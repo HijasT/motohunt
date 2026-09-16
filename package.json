@@ -4,6 +4,9 @@
   "private": true,
   "description": "Tracks UAE used-car listings against saved searches (Next.js + Supabase); a GitHub Actions cron scrapes the sites and writes the data.",
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
