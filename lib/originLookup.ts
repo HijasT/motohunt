@@ -1,0 +1,56 @@
+// Country of make isn't listed on any of these sites, so we infer it from the brand.
+// Extend this table as you search for more makes.
+const ORIGIN_BY_MAKE: Record<string, string> = {
+  toyota: "Japan",
+  lexus: "Japan",
+  nissan: "Japan",
+  honda: "Japan",
+  mazda: "Japan",
+  mitsubishi: "Japan",
+  suzuki: "Japan",
+  hyundai: "South Korea",
+  kia: "South Korea",
+  genesis: "South Korea",
+  mercedes: "Germany",
+  "mercedes-benz": "Germany",
+  bmw: "Germany",
+  audi: "Germany",
+  volkswagen: "Germany",
+  porsche: "Germany",
+  ford: "USA",
+  chevrolet: "USA",
+  gmc: "USA",
+  jeep: "USA",
+  dodge: "USA",
+  cadillac: "USA",
+  tesla: "USA",
+  landrover: "UK",
+  "land-rover": "UK",
+  jaguar: "UK",
+  bentley: "UK",
+  rollsroyce: "UK",
+  "rolls-royce": "UK",
+  mini: "UK",
+  ferrari: "Italy",
+  lamborghini: "Italy",
+  maserati: "Italy",
+  fiat: "Italy",
+  alfaromeo: "Italy",
+  "alfa-romeo": "Italy",
+  peugeot: "France",
+  renault: "France",
+  citroen: "France",
+  volvo: "Sweden",
+  skoda: "Czech Republic",
+  mg: "China",
+  geely: "China",
+  chery: "China",
+  byd: "China",
+  haval: "China",
+};
+
+export function lookupOrigin(make: string | null): string | null {
+  if (!make) return null;
+  const key = make.trim().toLowerCase().replace(/\s+/g, "-");
+  return ORIGIN_BY_MAKE[key] ?? null;
+}
