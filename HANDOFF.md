@@ -7,21 +7,23 @@ ranges), scraped on a schedule, browsable with favorite/dislike triage.
 **v1** (Google Sheets output) shipped first, then **v2** (`DESIGN.md` — Supabase +
 Next.js) replaced it. This repo is now v2; v1's Sheets writer is gone.
 
-## Status — v2 built, not yet deployed
+## Status — v2 built and deployed, live in production
 
-Everything in `DESIGN.md` is implemented: schema, scrapers writing into Supabase,
-and the Next.js Results/Favorites/Settings UI. `npm run build` and `npm run
-typecheck` both pass. **Not done, because it needs your accounts**: creating the
-actual Supabase project and Vercel deployment — `README.md` has the exact steps.
+Supabase project created, schema deployed, Vercel frontend live (behind Vercel
+Authentication - password protection needs a Pro plan, this account is on Hobby),
+GitHub Actions secrets set, and the 6-hour cron has completed real successful runs
+writing real listings into production Supabase. Not a dry run - the pipeline has
+been exercised end to end with the user's actual saved searches.
 
-### Scraper sources (unchanged from v1, still verified)
+### Scraper sources
 
 | Source | Status |
 |---|---|
 | Dubizzle | ✅ working |
 | CarSwitch | ✅ working |
 | Al Futtaim Automall | ✅ working |
-| YallaMotors | ⚠️ unverified — site unreachable from this machine, see `DEV_NOTES.md` |
+| Cars24 | ✅ working — added 2026-09-17, no schema.org JSON-LD (see `DEV_NOTES.md` for the RSC-parsing approach) |
+| YallaMotors | ⚠️ unverified — blocked identically from two unrelated networks (this dev machine AND the GitHub Actions runner); looks like a datacenter/cloud-IP block, not a wrong-URL problem. See `DEV_NOTES.md`. |
 | Al Aweer Auto Market | ❌ not built — site is a pre-launch waitlist page, nothing to scrape |
 
 ## Four open decisions from DESIGN.md, and what was done
@@ -63,20 +65,22 @@ DESIGN.md flagged these directly or implied them; here's how each was resolved a
    at this data volume. The Settings tab includes an un-dislike view so this
    isn't a one-way door.
 
-## What's next (needs your accounts, so it's on you)
+## What's next
 
-1. Create the Supabase project, run `supabase/schema.sql`, grab the three keys.
-2. `npm run dev` locally with `.env.local` set (see `.env.example`), create a
-   couple of saved searches, confirm Results/Favorites/Settings all work.
-3. `npm run scrape` locally (or `npm run verify` first to sanity-check the sites
-   without touching Supabase at all) to confirm the writer path works end to end.
-4. Deploy the frontend to Vercel, turn on password protection (no login is built —
-   see DESIGN.md's Auth note), add the GitHub Actions secrets, confirm the cron
-   fires.
-5. **If continuing to build:** YallaMotors needs someone on a UAE network to run
-   `npm run verify` and fix the URL shapes in `scrapers/yallamotors.ts` (see
-   `DEV_NOTES.md` for exactly what's broken and how to check). Al Aweer has
-   nothing to scrape until they launch their site.
+Everything in the original ask is done and running. If picking this back up:
+
+1. **YallaMotors** genuinely needs a non-datacenter connection (a real UAE
+   residential/mobile network, not a VPN) to even find out whether the site is
+   reachable at all - see `DEV_NOTES.md` for why this dev machine and GitHub
+   Actions both hit the identical block and can't tell us more from here.
+2. **Cars24 pagination** stops at the first server-rendered batch (~15-40 cars
+   per URL) - their "load more" is a client-side fetch whose endpoint wasn't
+   captured. Fine for comparison shopping; a real gap if you need their full
+   inventory for a make.
+3. **Password protection** would need a Vercel Pro plan; Vercel Authentication
+   (log into Vercel to view) is the substitute on Hobby, which works fine since
+   there's only one team member anyway.
+4. Al Aweer has nothing to scrape until they launch their site.
 
 ## Architecture
 
@@ -101,4 +105,10 @@ Full file-by-file breakdown is in `README.md`.
 - This is a single-user, no-login app. Protecting the deployed frontend (Vercel
   password protection or similar) is on you — it isn't built into the app itself.
 - Personal price comparison only — keep the cron at 6h, don't hammer the sites.
-- Cars24 and Kavak remain skipped (stricter anti-bot).
+- Kavak remains skipped (stricter anti-bot); Cars24 is now built (see above).
+- GitHub Actions runners need Node 22+ (`@supabase/supabase-js`'s realtime client
+  requires native `WebSocket`, stable only from Node 22) - `package.json` pins
+  `engines.node` accordingly; don't drop the workflow's `node-version` back to 20.
+- `index.ts` calls `process.exit(0)` after a successful run - without it, the
+  Supabase client keeps a connection open and the process hangs indefinitely
+  instead of exiting (would eventually be force-killed by the Action's timeout).

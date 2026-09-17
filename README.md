@@ -15,7 +15,7 @@ now implements, and `HANDOFF.md` for the decisions made along the way.
 | CarSwitch | ✅ working | Playwright + schema.org JSON-LD |
 | Al Futtaim Automall | ✅ working | their public JSON API (no browser needed) |
 | Cars24 | ✅ working | plain fetch + Next.js's internal RSC data format (no JSON-LD available) |
-| YallaMotors | ⚠️ unverified | site unreachable from the dev machine — see `DEV_NOTES.md` |
+| YallaMotors | ⚠️ unverified | blocked identically from two unrelated networks — looks like a datacenter-IP block, see `DEV_NOTES.md` |
 | Al Aweer Auto Market | ❌ not built | site is still a pre-launch waitlist page with no listings |
 
 `DEV_NOTES.md` has the verified URL shapes, query params and API details for each site.

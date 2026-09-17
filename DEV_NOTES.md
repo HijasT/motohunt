@@ -123,27 +123,42 @@ return the unfiltered list**, so server-side filtering alone is not trustworthy.
   `cdpRelativeUrl` (append to `https://www.cars24.ae/`), `appointmentId`
   (their listing ID), `odometer.value`, `listingPriceV2.value`.
 
-## YallaMotors — `scrapers/yallamotors.ts` ⚠️ UNVERIFIED
+## YallaMotors — `scrapers/yallamotors.ts` ⚠️ UNVERIFIED - likely blocks datacenter IPs
 
-**Could not be reached to verify.** As of 2026-09-17:
+**Blocked identically from two unrelated networks**, which points at something
+more specific than "wrong network" - re-checked 2026-09-17:
 
 - `uae.yallamotors.com` — the host the original plan assumed — **does not resolve**
-  (NXDOMAIN on public DNS).
-- `yallamotors.com` and `www.yallamotors.com` resolve to `130.61.42.24`, which
-  presents a certificate for a different name and answers **403 Forbidden** (bare
-  nginx) to every request, over both HTTP and HTTPS, with or without browser
-  headers. That looks like an origin server behind geo-restriction or a WAF.
+  (NXDOMAIN on public DNS) from either network.
+- `yallamotors.com` / `www.yallamotors.com` resolve to `130.61.42.24`, present a
+  certificate for a different name, and answer bare-nginx **403 Forbidden** to
+  every request - with or without browser headers, from a real headless Chromium
+  with geolocation spoofed to Dubai, and (unlike Dubizzle's Imperva) with no JS
+  challenge page at all. Just a flat rejection at the server/WAF level.
+- The **exact same** `net::ERR_NAME_NOT_RESOLVED` / 403 pair was reproduced from a
+  GitHub Actions runner (Azure-hosted, nothing like this dev machine's network),
+  in the same production run that got real results from four other sites in the
+  same few minutes. Two unrelated networks failing identically suggests the block
+  is keyed on the request coming from a **datacenter/cloud IP range** in general,
+  not on this specific machine, VPN, or geography.
+
+Practically: this is unlikely to ever pass from any GitHub Actions runner or
+similar hosted CI, because that will always be a datacenter IP. Confirming or
+fixing it needs an actual UAE residential/mobile connection.
 
 The scraper is therefore written to fail safe rather than to guess loudly: it tries
 several plausible URL shapes, keeps the first that returns listings, reads JSON-LD
 permissively, and runs everything through `matchesFilters()` so it cannot emit
-non-matching rows. If nothing works it logs a warning and returns `[]`.
+non-matching rows. If nothing works it logs a warning **with the underlying
+navigation error** (added 2026-09-17, was previously silent) and returns `[]`.
 
-**To finish it**, from a network that can reach the site (e.g. inside the UAE):
+**To finish it**, from a genuine UAE residential/mobile connection (not a VPN,
+not any cloud host):
 
-1. `npm run verify` and see whether YallaMotors returns anything.
-2. If not, open a used-car search in a browser, note the real path and query params,
-   and update `candidateUrls()`.
+1. `npm run verify` and see whether YallaMotors returns anything, and what the
+   logged "Last error" says if not.
+2. If it resolves and loads, open a used-car search in a browser, note the real
+   path and query params, and update `candidateUrls()`.
 3. Check whether the page has `<script type="application/ld+json">` with an
    `ItemList`. If it does, `extractVehicles()` should already handle it. If not,
    that is the one site that will need real CSS selectors.
