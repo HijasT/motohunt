@@ -87,6 +87,8 @@ export async function scrapeYallaMotors(filters: SearchFilters): Promise<CarList
   const page = await ctx.newPage();
   const listings: CarListing[] = [];
 
+  let lastError: string | null = null;
+
   try {
     // Settle on a URL shape using page 1, then stay on it for the rest.
     let baseIndex = -1;
@@ -99,8 +101,9 @@ export async function scrapeYallaMotors(filters: SearchFilters): Promise<CarList
       for (const [i, url] of toTry.entries()) {
         try {
           vehicles = extractVehicles(await readJsonLd(page, url));
-        } catch {
-          continue; // DNS failure, 403, timeout - try the next shape
+        } catch (err) {
+          lastError = err instanceof Error ? err.message : String(err); // DNS failure, 403, timeout - try the next shape
+          continue;
         }
         if (vehicles.length > 0) {
           if (baseIndex === -1) baseIndex = i;
@@ -120,7 +123,9 @@ export async function scrapeYallaMotors(filters: SearchFilters): Promise<CarList
 
     if (listings.length === 0) {
       console.warn(
-        "YallaMotors: no listings found. This scraper is unverified - check the URL shapes in scrapers/yallamotors.ts against the live site."
+        `YallaMotors: no listings found. This scraper is unverified - check the URL shapes in scrapers/yallamotors.ts against the live site.${
+          lastError ? ` Last error: ${lastError.slice(0, 200)}` : ""
+        }`
       );
     }
   } finally {

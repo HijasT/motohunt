@@ -82,6 +82,47 @@ return the unfiltered list**, so server-side filtering alone is not trustworthy.
   `aeautomall-new.corp.al-futtaim.com`. Those are internal hosts, unreachable from
   the public internet — use the `www.automall.ae/bff/...` proxy paths.
 
+## Cars24 — `scrapers/cars24.ts` ✅ verified 2026-09-17
+
+- No bot protection; a plain `fetch()` works, no browser needed.
+- **URL**: `https://www.cars24.ae/buy-used-<make>-<model>-cars-dubai/` (model
+  omitted if not given, make omitted too for a budget-only search →
+  `/buy-used-cars-dubai/`). Despite the `-dubai` suffix this is their general
+  UAE catalog — a Sharjah-listed car showed up in it during testing. A
+  `-uae`-suffixed variant of these URLs also exists but isn't server-rendered
+  with any data, so it's not used.
+- **No working price/km/year param was found** (query param and JSON-LD
+  approaches don't apply here — see below), so those are enforced locally by
+  `matchesFilters()`, same as CarSwitch.
+- **No pagination beyond the first server-rendered batch** (~15-40 cars per
+  URL). Loading more is a client-side "load more" fetch, not a `?page=` param;
+  capturing that endpoint wasn't attempted. Fine for a comparison tool, but a
+  real gap if you need Cars24's *entire* inventory for a make.
+- **Data**: no schema.org JSON-LD at all. The listing cards are server-rendered,
+  but the data travels in Next.js App Router's internal RSC "Flight" wire
+  format — `self.__next_f.push([1, "<id>:<json>\n<id>:<json>..."])` script
+  tags, all sharing one id namespace across the page, with `"$<id>"` acting as
+  a reference to another entry. `lib/rscFlight.ts` parses this.
+  - **This is not a stable public contract** — it's React/Next.js internals,
+    subject to change with their framework version, unlike JSON-LD which is
+    aimed at search engines and much more likely to stay put. If Cars24 starts
+    coming back empty, this is the first thing to suspect.
+  - **Gotcha that cost real debugging time**: each `push()` is a fixed-size
+    fragment (~2KB) of *one continuous stream*, not a self-contained unit — a
+    single field (an SEO description block, say) can be long enough to span
+    several pushes and get cut mid-value if you parse each push independently.
+    `parseFlightStore()` concatenates every push's unescaped text first, in
+    document order, before splitting on `<id>:` boundaries. The boundary
+    search itself also tracks JSON nesting depth and string state (not a
+    naive newline split), because a value can legitimately contain a raw
+    newline that isn't a record boundary.
+  - Prefer `listingPriceV2` over `listingPrice` for the price - both carry the
+    same number, but `listingPrice` was the one actually observed truncated
+    before the fix above; keeping the fallback costs nothing.
+- **Fields used**: `make`, `model`, `year`, `carName`, `fuelType`,
+  `cdpRelativeUrl` (append to `https://www.cars24.ae/`), `appointmentId`
+  (their listing ID), `odometer.value`, `listingPriceV2.value`.
+
 ## YallaMotors — `scrapers/yallamotors.ts` ⚠️ UNVERIFIED
 
 **Could not be reached to verify.** As of 2026-09-17:

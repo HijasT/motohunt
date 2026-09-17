@@ -5,6 +5,7 @@ import { scrapeDubizzle } from "../scrapers/dubizzle.js";
 import { scrapeCarSwitch } from "../scrapers/carswitch.js";
 import { scrapeAutoMall } from "../scrapers/automall.js";
 import { scrapeYallaMotors } from "../scrapers/yallamotors.js";
+import { scrapeCars24 } from "../scrapers/cars24.js";
 
 export type Scraper = {
   name: string;
@@ -20,6 +21,7 @@ export const scrapers: Scraper[] = [
   { name: "CarSwitch", run: scrapeCarSwitch },
   { name: "Al Futtaim Automall", run: scrapeAutoMall },
   { name: "YallaMotors", run: scrapeYallaMotors },
+  { name: "Cars24", run: scrapeCars24 },
 ];
 
 export type SourceResult =

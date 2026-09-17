@@ -14,6 +14,7 @@ now implements, and `HANDOFF.md` for the decisions made along the way.
 | Dubizzle | ✅ working | Playwright + schema.org JSON-LD (Imperva challenge handled) |
 | CarSwitch | ✅ working | Playwright + schema.org JSON-LD |
 | Al Futtaim Automall | ✅ working | their public JSON API (no browser needed) |
+| Cars24 | ✅ working | plain fetch + Next.js's internal RSC data format (no JSON-LD available) |
 | YallaMotors | ⚠️ unverified | site unreachable from the dev machine — see `DEV_NOTES.md` |
 | Al Aweer Auto Market | ❌ not built | site is still a pre-launch waitlist page with no listings |
 
@@ -116,6 +117,7 @@ lib/
                            sharing one browser), collects per-source results
   browser.ts              shared Playwright browser + JSON-LD reading
   jsonld.ts               schema.org vehicle -> CarListing mapping
+  rscFlight.ts            parses Cars24's Next.js RSC data format (no JSON-LD there)
   filters.ts              filter re-checking, number parsing, dedupe
   originLookup.ts         static make -> country-of-origin table
   supabaseWriter.ts        scraper-side: upserts CarListing[] into Supabase
