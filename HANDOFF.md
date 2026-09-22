@@ -65,6 +65,24 @@ DESIGN.md flagged these directly or implied them; here's how each was resolved a
    at this data volume. The Settings tab includes an un-dislike view so this
    isn't a one-way door.
 
+## Features added 2026-09-23
+
+- **Price tracking** - `supabase/migrations/20260923_price_tracking.sql` adds
+  `original_price` / `previous_price` / `price_changed_at` to `listings` and a
+  `price_history` table; `upsert_listing()` fills them (same signature as before).
+  Cards show "↓ 3,000 ~~49,000~~"; Results has a "price drops" filter.
+- **Duplicate grouping** (`lib/listingInsights.ts`) - same make/model/year, km
+  within 1.5%, price within 15%, and a listing must match *every* copy already in
+  a group (no chaining). Frontend-only; favorite/hide act on all copies at once.
+- **Deal score** - vs. same model ±1 year: median of similar-mileage cars (±30%),
+  else a price-vs-km line, else plain median; needs ≥3 comparables. Trim level
+  isn't scraped, so a V6 vs V8 gap can read as a "deal" - it's a hint, not a verdict.
+- **Scraper status** - `index.ts` writes `app_state['last_scrape']` after each run
+  (also on crash). Header pill + Settings panel; warns if >9h old or the run failed.
+- **"Not seen" listings** - flagged when the latest run finished >13h after the
+  listing was last seen and its site didn't fail in that run.
+- **Edit saved searches** (Settings), **installable PWA** (`app/manifest.ts`, icons).
+
 ## What's next
 
 Everything in the original ask is done and running. If picking this back up:

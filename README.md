@@ -36,7 +36,7 @@ whenever the app's Results tab looks wrong: it tells apart "no car matched" from
 ## 2. Set up Supabase
 
 1. Create a project at [supabase.com](https://supabase.com).
-2. Open the SQL editor and run `supabase/schema.sql` once.
+2. Open the SQL editor and run `supabase/schema.sql` once. (It already includes everything in `supabase/migrations/`; those files are only for upgrading a database created from an older `schema.sql`.)
 3. From Project Settings → API, note the **Project URL**, the **anon public** key, and
    the **service_role** key.
 
@@ -107,6 +107,7 @@ app/                     Next.js frontend (App Router)
   components/               ListingCard, FilterBar, SavedSearchPicker, *Tab.tsx
 supabase/
   schema.sql               run once in the Supabase SQL editor
+  migrations/              incremental upgrades for existing databases (already folded into schema.sql)
 index.ts                 scrape everything, write to Supabase   (npm run scrape)
 verify.ts                scrape everything, print it, write nothing   (npm run verify)
 lib/

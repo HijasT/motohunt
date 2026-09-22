@@ -1,21 +1,90 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import type { ListingRow, SavedSearchRow } from "../../lib/supabase/types";
-import { fetchResults, getLastVisit, markVisitedNow, setListingStatus } from "../../lib/supabase/queries";
-import { ListingCard, actionButtonClass } from "./ListingCard";
+import { useEffect, useMemo, useState } from "react";
+import type { ListingRow, SavedSearchRow, ScrapeStatus } from "../../lib/supabase/types";
+import { clearListingStatus, fetchResults, setListingStatus } from "../../lib/supabase/queries";
+import { groupDuplicates, isGroupGone, priceChange, type Deal, type ListingGroup } from "../../lib/listingInsights";
+import { ListingCard } from "./ListingCard";
+import { EyeOffIcon, HeartIcon, SearchIcon } from "./icons";
+import {
+  CardGridSkeleton,
+  EmptyState,
+  ErrorNote,
+  errorMessage,
+  ghostButtonClass,
+  inputClass,
+  secondaryButtonClass,
+  usePersistentState,
+  useToast,
+} from "./ui";
 
-type SortKey = "date" | "price" | "km" | "year";
+type SortKey = "date" | "deal" | "price" | "price_desc" | "km" | "year";
+type Toggle = "new" | "drops" | "deals";
 
 type Props = {
   selectedSearches: SavedSearchRow[];
+  /** Previous visit time, read once per page load by the parent (null = first visit ever). */
+  lastVisit: string | null;
+  onClearSelection: () => void;
+  deals: Map<string, Deal>;
+  scrape: ScrapeStatus | null;
 };
 
-export function ResultsTab({ selectedSearches }: Props) {
+function matchesQuery(g: ListingGroup, q: string): boolean {
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return true;
+  const haystack = [g.primary, ...g.others]
+    .map((l) => `${l.year ?? ""} ${l.make} ${l.model} ${l.source} ${l.country_of_make ?? ""} ${l.description ?? ""}`)
+    .join(" ")
+    .toLowerCase();
+  return words.every((word) => haystack.includes(word));
+}
+
+const hasDrop = (g: ListingGroup) => (priceChange(g.primary)?.delta ?? 0) < 0;
+
+const selectClass = `${inputClass} w-auto py-1.5 pr-8`;
+
+function ToggleChip({
+  active,
+  onClick,
+  tone,
+  children,
+  title,
+}: {
+  active: boolean;
+  onClick: () => void;
+  tone: "emerald" | "sky";
+  children: React.ReactNode;
+  title: string;
+}) {
+  const tones = {
+    emerald: active
+      ? "bg-emerald-600 text-white"
+      : "bg-emerald-100 text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-950 dark:text-emerald-300",
+    sky: active
+      ? "bg-sky-600 text-white"
+      : "bg-sky-100 text-sky-700 hover:bg-sky-200 dark:bg-sky-950 dark:text-sky-300",
+  };
+  return (
+    <button
+      onClick={onClick}
+      aria-pressed={active}
+      title={title}
+      className={`rounded-full px-2.5 py-0.5 text-xs font-semibold transition ${tones[tone]}`}
+    >
+      {children}
+    </button>
+  );
+}
+
+export function ResultsTab({ selectedSearches, lastVisit, onClearSelection, deals, scrape }: Props) {
+  const { notify } = useToast();
   const [listings, setListings] = useState<ListingRow[] | null>(null);
-  const [lastVisit, setLastVisit] = useState<string | null>(null);
-  const [sort, setSort] = useState<SortKey>("date");
   const [error, setError] = useState<string | null>(null);
+  const [sort, setSort] = usePersistentState<SortKey>("motohunt.sort", "date");
+  const [query, setQuery] = useState("");
+  const [source, setSource] = useState("all");
+  const [toggle, setToggle] = useState<Toggle | null>(null);
 
   const selectionKey = selectedSearches
     .map((s) => s.id)
@@ -26,93 +95,237 @@ export function ResultsTab({ selectedSearches }: Props) {
     let cancelled = false;
     setListings(null);
     setError(null);
-
-    (async () => {
-      try {
-        // Read the previous visit time first so this load's own badges are computed
-        // against it, then bump it - otherwise every load would erase its own "new".
-        const [previousVisit, rows] = await Promise.all([getLastVisit(), fetchResults(selectedSearches)]);
-        if (cancelled) return;
-        setLastVisit(previousVisit);
-        setListings(rows);
-        await markVisitedNow();
-      } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
-      }
-    })();
-
+    fetchResults(selectedSearches)
+      .then((rows) => !cancelled && setListings(rows))
+      .catch((e) => !cancelled && setError(errorMessage(e)));
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectionKey]);
 
-  async function handleDislike(uniqueKey: string) {
-    setListings((prev) => prev?.filter((l) => l.unique_key !== uniqueKey) ?? prev);
-    await setListingStatus(uniqueKey, "disliked");
-  }
+  const groups = useMemo(() => groupDuplicates(listings ?? []), [listings]);
 
-  async function handleFavorite(uniqueKey: string) {
-    setListings((prev) => prev?.filter((l) => l.unique_key !== uniqueKey) ?? prev);
-    await setListingStatus(uniqueKey, "favorited");
-  }
+  const isNew = (g: ListingGroup) => !!lastVisit && g.firstSeenAt > lastVisit;
+  const dealOf = (g: ListingGroup) => deals.get(g.primary.unique_key);
+  const isDeal = (g: ListingGroup) => {
+    const label = dealOf(g)?.label;
+    return label === "great" || label === "good";
+  };
 
-  if (error) return <p className="text-sm text-red-600">{error}</p>;
-  if (listings === null) return <p className="text-sm text-neutral-500">Loading…</p>;
-  if (listings.length === 0) {
-    return <p className="text-sm text-neutral-500">No listings match yet. The scraper runs every 6 hours.</p>;
-  }
+  const counts = useMemo(
+    () => ({
+      new: groups.filter(isNew).length,
+      drops: groups.filter(hasDrop).length,
+      deals: groups.filter(isDeal).length,
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [groups, lastVisit, deals]
+  );
 
-  const sorted = [...listings].sort((a, b) => {
-    switch (sort) {
-      case "price":
-        return (a.price ?? Infinity) - (b.price ?? Infinity);
-      case "km":
-        return (a.km ?? Infinity) - (b.km ?? Infinity);
-      case "year":
-        return (b.year ?? 0) - (a.year ?? 0);
-      default:
-        return new Date(b.first_seen_at).getTime() - new Date(a.first_seen_at).getTime();
+  const sources = useMemo(() => [...new Set((listings ?? []).map((l) => l.source))].sort(), [listings]);
+
+  const visible = useMemo(() => {
+    const filtered = groups.filter(
+      (g) =>
+        (source === "all" || [g.primary, ...g.others].some((l) => l.source === source)) &&
+        (toggle !== "new" || isNew(g)) &&
+        (toggle !== "drops" || hasDrop(g)) &&
+        (toggle !== "deals" || isDeal(g)) &&
+        matchesQuery(g, query)
+    );
+    return filtered.sort((ga, gb) => {
+      const a = ga.primary;
+      const b = gb.primary;
+      switch (sort) {
+        case "deal":
+          return (dealOf(ga)?.deltaPct ?? Infinity) - (dealOf(gb)?.deltaPct ?? Infinity);
+        case "price":
+          return (a.price ?? Infinity) - (b.price ?? Infinity);
+        case "price_desc":
+          return (b.price ?? -Infinity) - (a.price ?? -Infinity);
+        case "km":
+          return (a.km ?? Infinity) - (b.km ?? Infinity);
+        case "year":
+          return (b.year ?? 0) - (a.year ?? 0);
+        default:
+          return gb.firstSeenAt.localeCompare(ga.firstSeenAt);
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groups, source, toggle, query, sort, lastVisit, deals]);
+
+  /** Optimistically removes the card (all copies of the car), persists, and offers an undo. */
+  async function triage(group: ListingGroup, status: "favorited" | "disliked") {
+    const members = [group.primary, ...group.others];
+    const keys = new Set(group.keys);
+    const restore = () =>
+      setListings((prev) => (prev ? [...prev.filter((l) => !keys.has(l.unique_key)), ...members] : prev));
+
+    setListings((prev) => prev?.filter((l) => !keys.has(l.unique_key)) ?? prev);
+    try {
+      await setListingStatus(group.keys, status);
+      notify(status === "favorited" ? "Saved to favorites" : "Listing hidden", {
+        onUndo: async () => {
+          restore();
+          try {
+            await clearListingStatus(group.keys);
+          } catch (e) {
+            notify(`Couldn't undo: ${errorMessage(e)}`, { tone: "error" });
+          }
+        },
+      });
+    } catch (e) {
+      restore();
+      notify(`Couldn't update listing: ${errorMessage(e)}`, { tone: "error" });
     }
-  });
+  }
+
+  const resetFilters = () => {
+    setQuery("");
+    setSource("all");
+    setToggle(null);
+  };
+  const flip = (t: Toggle) => setToggle(toggle === t ? null : t);
+
+  if (error) return <ErrorNote>{error}</ErrorNote>;
+  if (listings === null) return <CardGridSkeleton />;
+
+  if (listings.length === 0) {
+    return (
+      <EmptyState title={selectedSearches.length > 0 ? "No listings match these searches" : "No listings yet"}>
+        {selectedSearches.length > 0 ? (
+          <>
+            Nothing current matches the selected searches.{" "}
+            <button className="font-medium text-orange-600 hover:underline" onClick={onClearSelection}>
+              Show all listings
+            </button>
+          </>
+        ) : (
+          "The scraper runs every 6 hours — new matches for your saved searches will show up here."
+        )}
+      </EmptyState>
+    );
+  }
+
+  const narrowed = query.trim() !== "" || source !== "all" || toggle !== null;
+  const dupes = listings.length - groups.length;
 
   return (
     <div>
-      <div className="mb-3 flex items-center justify-between">
-        <p className="text-sm text-neutral-500">
-          {listings.length} listing{listings.length === 1 ? "" : "s"}
-        </p>
-        <select
-          value={sort}
-          onChange={(e) => setSort(e.target.value as SortKey)}
-          className="rounded-md border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-700 dark:bg-neutral-900"
-        >
-          <option value="date">Newest first</option>
-          <option value="price">Price: low to high</option>
-          <option value="km">Mileage: low to high</option>
-          <option value="year">Year: newest first</option>
-        </select>
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div className="relative flex-1">
+          <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-neutral-400">
+            <SearchIcon />
+          </span>
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Narrow results — e.g. “gxr 2020” or “hybrid”"
+            aria-label="Narrow results"
+            className={`${inputClass} py-1.5 pl-9`}
+          />
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {sources.length > 1 && (
+            <select value={source} onChange={(e) => setSource(e.target.value)} aria-label="Source" className={selectClass}>
+              <option value="all">All sources</option>
+              {sources.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+          )}
+          <select
+            value={sort}
+            onChange={(e) => setSort(e.target.value as SortKey)}
+            aria-label="Sort"
+            className={selectClass}
+          >
+            <option value="date">Newest found</option>
+            <option value="deal">Best deal first</option>
+            <option value="price">Price: low to high</option>
+            <option value="price_desc">Price: high to low</option>
+            <option value="km">Mileage: low to high</option>
+            <option value="year">Year: newest first</option>
+          </select>
+        </div>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {sorted.map((listing) => (
-          <ListingCard
-            key={listing.unique_key}
-            listing={listing}
-            isNew={!!lastVisit && new Date(listing.first_seen_at) > new Date(lastVisit)}
-            actions={
-              <>
-                <button className={actionButtonClass} onClick={() => handleFavorite(listing.unique_key)}>
-                  ☆ Favorite
-                </button>
-                <button className={actionButtonClass} onClick={() => handleDislike(listing.unique_key)}>
-                  ✕ Dislike
-                </button>
-              </>
-            }
-          />
-        ))}
+      <div className="mb-3 flex flex-wrap items-center gap-2 text-sm text-neutral-500">
+        <span className="mr-1 tabular-nums" title={dupes > 0 ? `${dupes} duplicate listing(s) merged into their car` : undefined}>
+          {narrowed ? `${visible.length} of ${groups.length}` : groups.length} car{groups.length === 1 ? "" : "s"}
+          {dupes > 0 && <span className="text-neutral-400"> · {listings.length} listings</span>}
+        </span>
+        {counts.new > 0 && (
+          <ToggleChip active={toggle === "new"} onClick={() => flip("new")} tone="emerald" title="New since your last visit">
+            {counts.new} new
+          </ToggleChip>
+        )}
+        {counts.drops > 0 && (
+          <ToggleChip active={toggle === "drops"} onClick={() => flip("drops")} tone="sky" title="Cheaper than when first seen">
+            ↓ {counts.drops} price drop{counts.drops === 1 ? "" : "s"}
+          </ToggleChip>
+        )}
+        {counts.deals > 0 && (
+          <ToggleChip
+            active={toggle === "deals"}
+            onClick={() => flip("deals")}
+            tone="emerald"
+            title="At least 4% below the median of similar cars"
+          >
+            {counts.deals} good deal{counts.deals === 1 ? "" : "s"}
+          </ToggleChip>
+        )}
+        {narrowed && (
+          <button
+            className="ml-auto text-sm font-medium text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
+            onClick={resetFilters}
+          >
+            Reset filters
+          </button>
+        )}
       </div>
+
+      {visible.length === 0 ? (
+        <EmptyState title="Nothing matches those filters">
+          <button className={`${secondaryButtonClass} mt-3`} onClick={resetFilters}>
+            Reset filters
+          </button>
+        </EmptyState>
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {visible.map((group) => (
+            <ListingCard
+              key={group.primary.unique_key}
+              group={group}
+              isNew={isNew(group)}
+              deal={dealOf(group)}
+              gone={isGroupGone(group, scrape)}
+              actions={
+                <>
+                  <button
+                    className={`${ghostButtonClass} hover:!text-rose-600`}
+                    onClick={() => triage(group, "favorited")}
+                    title="Move to Favorites"
+                  >
+                    <HeartIcon /> Favorite
+                  </button>
+                  <button
+                    className={ghostButtonClass}
+                    onClick={() => triage(group, "disliked")}
+                    title={group.others.length > 0 ? "Hide this car (all its listings)" : "Hide this listing (undo from Settings)"}
+                  >
+                    <EyeOffIcon /> Hide
+                  </button>
+                </>
+              }
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

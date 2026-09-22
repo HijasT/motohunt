@@ -24,6 +24,9 @@ create table listings (
   description text,
   link text not null,
   country_of_make text,
+  original_price numeric,                -- price at first sighting
+  previous_price numeric,                -- price before the most recent change
+  price_changed_at timestamptz,          -- when that change was seen
   first_seen_at timestamptz not null default now(),
   last_seen_at timestamptz not null default now(),
   expires_at timestamptz not null default (now() + interval '14 days')
@@ -32,10 +35,21 @@ create table listings (
 create index listings_expires_at_idx on listings (expires_at);
 create index listings_make_model_idx on listings (make, model);
 
--- Insert-or-refresh a sighting of a listing. `first_seen_at` is left untouched on
--- conflict (it's simply absent from the UPDATE SET below); everything else,
--- including `expires_at`, is refreshed to "now + 14 days" so a listing that's
--- still live keeps sliding forward instead of expiring out from under itself.
+-- One row per observed price (first sighting + each change). No FK to listings,
+-- same reasoning as listing_status: history should outlive a purge/re-insert.
+create table price_history (
+  id bigint generated always as identity primary key,
+  listing_unique_key text not null,
+  price numeric not null,
+  recorded_at timestamptz not null default now()
+);
+create index price_history_key_idx on price_history (listing_unique_key, recorded_at);
+
+-- Insert-or-refresh a sighting of a listing. `first_seen_at` is never touched on
+-- a repeat sighting; `expires_at` is refreshed to "now + 14 days" so a listing
+-- that's still live keeps sliding forward instead of expiring out from under
+-- itself. A missing price on a re-sighting keeps the last known price, and a
+-- real change is recorded in previous_price/price_changed_at + price_history.
 create or replace function upsert_listing(
   p_unique_key text,
   p_source text,
@@ -48,19 +62,44 @@ create or replace function upsert_listing(
   p_link text,
   p_country_of_make text
 ) returns void
-language sql
+language plpgsql
 as $$
-  insert into listings (
-    unique_key, source, make, model, year, price, km, description, link, country_of_make
-  ) values (
-    p_unique_key, p_source, p_make, p_model, p_year, p_price, p_km, p_description, p_link, p_country_of_make
-  )
-  on conflict (unique_key) do update set
-    price = excluded.price,
-    km = excluded.km,
-    description = excluded.description,
+declare
+  v_old_price numeric;
+  v_exists boolean;
+begin
+  select price, true into v_old_price, v_exists from listings where unique_key = p_unique_key for update;
+
+  if v_exists is null then
+    insert into listings (
+      unique_key, source, make, model, year, price, original_price, km, description, link, country_of_make
+    ) values (
+      p_unique_key, p_source, p_make, p_model, p_year, p_price, p_price, p_km, p_description, p_link, p_country_of_make
+    )
+    on conflict (unique_key) do nothing;
+    if p_price is not null then
+      insert into price_history (listing_unique_key, price) values (p_unique_key, p_price);
+    end if;
+    return;
+  end if;
+
+  if p_price is not null and v_old_price is not null and p_price <> v_old_price then
+    update listings set
+      previous_price = v_old_price,
+      price_changed_at = now()
+    where unique_key = p_unique_key;
+    insert into price_history (listing_unique_key, price) values (p_unique_key, p_price);
+  end if;
+
+  update listings set
+    price = coalesce(p_price, price),
+    original_price = coalesce(original_price, p_price),
+    km = p_km,
+    description = p_description,
     last_seen_at = now(),
-    expires_at = now() + interval '14 days';
+    expires_at = now() + interval '14 days'
+  where unique_key = p_unique_key;
+end;
 $$;
 
 create table saved_searches (
@@ -102,8 +141,10 @@ create table listing_status (
   created_at timestamptz not null default now()
 );
 
--- Single-row key/value store; currently just tracks "last time the Results tab
--- was viewed", used to compute each listing's NEW badge.
+-- Small key/value store:
+--   last_visit  - last time the app was opened, drives each listing's NEW badge
+--   last_scrape - summary of the latest scraper run (written by index.ts), drives
+--                 the "Updated Xh ago" header and the Settings scraper status
 create table app_state (
   key text primary key,
   value jsonb not null
@@ -121,6 +162,7 @@ alter table search_groups enable row level security;
 alter table search_group_members enable row level security;
 alter table listing_status enable row level security;
 alter table app_state enable row level security;
+alter table price_history enable row level security;
 
 create policy "anon full access" on listings for all to anon using (true) with check (true);
 create policy "anon full access" on saved_searches for all to anon using (true) with check (true);
@@ -128,3 +170,4 @@ create policy "anon full access" on search_groups for all to anon using (true) w
 create policy "anon full access" on search_group_members for all to anon using (true) with check (true);
 create policy "anon full access" on listing_status for all to anon using (true) with check (true);
 create policy "anon full access" on app_state for all to anon using (true) with check (true);
+create policy "anon read" on price_history for select to anon using (true);

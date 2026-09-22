@@ -16,6 +16,10 @@ export type ListingRow = {
   description: string | null;
   link: string;
   country_of_make: string | null;
+  /** Added by migrations/20260923_price_tracking.sql - may be absent on an un-migrated database. */
+  original_price?: number | null;
+  previous_price?: number | null;
+  price_changed_at?: string | null;
   first_seen_at: string;
   last_seen_at: string;
   expires_at: string;
@@ -53,6 +57,34 @@ export type ListingStatusRow = {
 };
 
 export type AppStateValue = { at: string | null };
+
+export type PriceHistoryRow = {
+  id: number;
+  listing_unique_key: string;
+  price: number;
+  recorded_at: string;
+};
+
+/** Per-site outcome of a scraper run, summed over every saved search. */
+export type ScrapeSourceStatus = {
+  name: string;
+  listings: number;
+  /** How many saved searches this site failed for (0 = fully healthy). */
+  failedSearches: number;
+  error?: string;
+};
+
+/** app_state['last_scrape'] - written by index.ts at the end of every run. */
+export type ScrapeStatus = {
+  at: string;
+  ok: boolean;
+  durationMs: number;
+  searches: number;
+  written: number;
+  failed: number;
+  sources: ScrapeSourceStatus[];
+  error?: string;
+};
 
 export type AppStateRow = {
   key: string;

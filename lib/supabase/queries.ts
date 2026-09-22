@@ -6,6 +6,7 @@ import type {
   AppStateValue,
   ListingRow,
   SavedSearchRow,
+  ScrapeStatus,
   SearchGroupRow,
 } from "./types";
 
@@ -93,19 +94,34 @@ async function fetchListingsByStatus(status: "favorited" | "disliked"): Promise<
 export const fetchFavorites = () => fetchListingsByStatus("favorited");
 export const fetchDisliked = () => fetchListingsByStatus("disliked");
 
-export async function setListingStatus(uniqueKey: string, status: "favorited" | "disliked"): Promise<void> {
+/**
+ * Takes several keys because duplicate listings of one car (same car on two
+ * sites, or a repost) are shown as a single card and triaged together.
+ */
+export async function setListingStatus(uniqueKeys: string[], status: "favorited" | "disliked"): Promise<void> {
   const supabase = getSupabaseClient();
   const { error } = await supabase
     .from("listing_status")
-    .upsert({ listing_unique_key: uniqueKey, status });
+    .upsert(uniqueKeys.map((listing_unique_key) => ({ listing_unique_key, status })));
   if (error) throw error;
 }
 
-/** Un-favorite or un-dislike - just removes the status row. */
-export async function clearListingStatus(uniqueKey: string): Promise<void> {
+/** Un-favorite or un-dislike - just removes the status rows. */
+export async function clearListingStatus(uniqueKeys: string[]): Promise<void> {
   const supabase = getSupabaseClient();
-  const { error } = await supabase.from("listing_status").delete().eq("listing_unique_key", uniqueKey);
+  const { error } = await supabase.from("listing_status").delete().in("listing_unique_key", uniqueKeys);
   if (error) throw error;
+}
+
+/**
+ * Every live listing regardless of favorite/dislike status - the comparison set
+ * for deal scores (a car you hid still tells you what that model sells for).
+ */
+export async function fetchMarketListings(): Promise<ListingRow[]> {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase.from("listings").select("*").gt("expires_at", new Date().toISOString());
+  if (error) throw error;
+  return data ?? [];
 }
 
 // ---- Saved searches -----------------------------------------------------
@@ -124,6 +140,12 @@ export async function createSavedSearch(input: SavedSearchInput): Promise<SavedS
   const { data, error } = await supabase.from("saved_searches").insert(input).select().single();
   if (error) throw error;
   return data;
+}
+
+export async function updateSavedSearch(id: string, input: SavedSearchInput): Promise<void> {
+  const supabase = getSupabaseClient();
+  const { error } = await supabase.from("saved_searches").update(input).eq("id", id);
+  if (error) throw error;
 }
 
 export async function deleteSavedSearch(id: string): Promise<void> {
@@ -193,4 +215,14 @@ export async function markVisitedNow(): Promise<void> {
     .from("app_state")
     .upsert({ key: "last_visit", value: { at: new Date().toISOString() } satisfies AppStateValue });
   if (error) throw error;
+}
+
+// ---- Scraper health ------------------------------------------------------------
+
+/** Summary of the latest scraper run (written by index.ts); null until the first run with this feature. */
+export async function getScrapeStatus(): Promise<ScrapeStatus | null> {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase.from("app_state").select("value").eq("key", "last_scrape").maybeSingle();
+  if (error) throw error;
+  return (data?.value as ScrapeStatus | undefined) ?? null;
 }
