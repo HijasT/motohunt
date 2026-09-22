@@ -63,3 +63,18 @@ export async function cleanupExpired(admin: SupabaseClient): Promise<number> {
   if (error) throw error;
   return data?.length ?? 0;
 }
+
+/** Ranks last 30 days; the frontend already ignores expired ones, this just keeps the table tidy. */
+export async function cleanupExpiredRankings(admin: SupabaseClient): Promise<number> {
+  const { data, error } = await admin
+    .from("rankings")
+    .delete()
+    .lt("expires_at", new Date().toISOString())
+    .select("id");
+  // Tolerate the table not existing yet (migration not applied) - never fail the scrape over it.
+  if (error) {
+    console.warn(`Skipped rankings cleanup: ${error.message}`);
+    return 0;
+  }
+  return data?.length ?? 0;
+}

@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { ListingRow, SavedSearchRow, ScrapeStatus } from "../../lib/supabase/types";
+import type { BlockedModelRow, ListingRow, SavedSearchRow, ScrapeStatus } from "../../lib/supabase/types";
 import { clearListingStatus, fetchResults, setListingStatus } from "../../lib/supabase/queries";
-import { groupDuplicates, isGroupGone, priceChange, type Deal, type ListingGroup } from "../../lib/listingInsights";
+import { groupDuplicates, isBlocked, isGroupGone, isGroupRanked, priceChange, type Deal, type ListingGroup } from "../../lib/listingInsights";
 import { ListingCard } from "./ListingCard";
-import { EyeOffIcon, HeartIcon, SearchIcon } from "./icons";
+import { BanIcon, EyeOffIcon, HeartIcon, SearchIcon } from "./icons";
 import {
   CardGridSkeleton,
   EmptyState,
@@ -28,6 +28,13 @@ type Props = {
   onClearSelection: () => void;
   deals: Map<string, Deal>;
   scrape: ScrapeStatus | null;
+  /** Ranked ads live on the Rank tab (even if never favorited), so they're left out here. */
+  rankedLinks: Set<string>;
+  /** Makes/models kept out of results (see Settings). */
+  blocked: BlockedModelRow[];
+  onBlock: (make: string, model: string) => void;
+  /** Changes when the user hits Refresh - refetch without resetting filters. */
+  reloadKey: number;
 };
 
 function matchesQuery(g: ListingGroup, q: string): boolean {
@@ -77,7 +84,17 @@ function ToggleChip({
   );
 }
 
-export function ResultsTab({ selectedSearches, lastVisit, onClearSelection, deals, scrape }: Props) {
+export function ResultsTab({
+  selectedSearches,
+  lastVisit,
+  onClearSelection,
+  deals,
+  scrape,
+  rankedLinks,
+  blocked,
+  onBlock,
+  reloadKey,
+}: Props) {
   const { notify } = useToast();
   const [listings, setListings] = useState<ListingRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -102,9 +119,14 @@ export function ResultsTab({ selectedSearches, lastVisit, onClearSelection, deal
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectionKey]);
+  }, [selectionKey, reloadKey]);
 
-  const groups = useMemo(() => groupDuplicates(listings ?? []), [listings]);
+  const unranked = useMemo(
+    () => groupDuplicates(listings ?? []).filter((g) => !isGroupRanked(g, rankedLinks)),
+    [listings, rankedLinks]
+  );
+  const groups = useMemo(() => unranked.filter((g) => !isBlocked(g.primary, blocked)), [unranked, blocked]);
+  const blockedCount = unranked.length - groups.length;
 
   const isNew = (g: ListingGroup) => !!lastVisit && g.firstSeenAt > lastVisit;
   const dealOf = (g: ListingGroup) => deals.get(g.primary.unique_key);
@@ -279,6 +301,11 @@ export function ResultsTab({ selectedSearches, lastVisit, onClearSelection, deal
             {counts.deals} good deal{counts.deals === 1 ? "" : "s"}
           </ToggleChip>
         )}
+        {blockedCount > 0 && (
+          <span className="text-neutral-400" title="Unblock models in Settings to see these again">
+            {blockedCount} hidden by blocked models
+          </span>
+        )}
         {narrowed && (
           <button
             className="ml-auto text-sm font-medium text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
@@ -319,6 +346,14 @@ export function ResultsTab({ selectedSearches, lastVisit, onClearSelection, deal
                     title={group.others.length > 0 ? "Hide this car (all its listings)" : "Hide this listing (undo from Settings)"}
                   >
                     <EyeOffIcon /> Hide
+                  </button>
+                  <button
+                    className={`${ghostButtonClass} px-2 hover:!text-red-600`}
+                    onClick={() => onBlock(group.primary.make, group.primary.model)}
+                    title={`Never show any ${group.primary.make} ${group.primary.model} in results (undo in Settings)`}
+                    aria-label={`Block all ${group.primary.make} ${group.primary.model}`}
+                  >
+                    <BanIcon />
                   </button>
                 </>
               }

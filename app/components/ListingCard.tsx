@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import type { ListingRow } from "../../lib/supabase/types";
+import type { LinkCheckRow, ListingRow } from "../../lib/supabase/types";
 import { priceChange, type Deal, type ListingGroup } from "../../lib/listingInsights";
 import { ExternalIcon } from "./icons";
 import { focusRing, formatNumber, ghostButtonClass, panelClass, timeAgo } from "./ui";
@@ -12,6 +12,8 @@ type Props = {
   deal?: Deal;
   /** Not seen by recent scraper runs - probably sold. */
   gone?: boolean;
+  /** Link check found the ad sold/removed - stronger than `gone`, shown instead of it. */
+  sold?: LinkCheckRow;
   actions?: ReactNode;
 };
 
@@ -75,17 +77,17 @@ function PriceLine({ listing }: { listing: ListingRow }) {
   );
 }
 
-export function ListingCard({ group, isNew, deal, gone, actions }: Props) {
+export function ListingCard({ group, isNew, deal, gone, sold, actions }: Props) {
   const listing = group.primary;
   const title = [listing.make, listing.model].filter(Boolean).join(" ");
 
   return (
     <article
       className={`${panelClass} group flex flex-col transition hover:border-neutral-300 hover:shadow-md dark:hover:border-neutral-700 ${
-        isNew ? "ring-1 ring-emerald-500/40" : ""
+        sold ? "!border-red-300 dark:!border-red-900" : isNew ? "ring-1 ring-emerald-500/40" : ""
       }`}
     >
-      <div className={`flex flex-1 flex-col gap-3 p-4 ${gone ? "opacity-60" : ""}`}>
+      <div className={`flex flex-1 flex-col gap-3 p-4 ${gone || sold ? "opacity-60" : ""}`}>
         <div className="flex items-center justify-between gap-2 text-xs">
           <div className="flex items-center gap-2">
             <span className="font-semibold uppercase tracking-wider text-neutral-500">{listing.source}</span>
@@ -95,7 +97,9 @@ export function ListingCard({ group, isNew, deal, gone, actions }: Props) {
               </span>
             )}
           </div>
-          {gone ? (
+          {sold ? (
+            <SoldTag check={sold} />
+          ) : gone ? (
             <span
               className="rounded-full bg-amber-100 px-2 py-0.5 font-semibold text-amber-800 dark:bg-amber-950 dark:text-amber-300"
               title={`Last seen ${new Date(listing.last_seen_at).toLocaleString()}. Recent scrapes haven't found it — likely sold, or no saved search covers it any more.`}
@@ -175,5 +179,18 @@ export function ListingCard({ group, isNew, deal, gone, actions }: Props) {
         </a>
       </div>
     </article>
+  );
+}
+
+export function SoldTag({ check }: { check: LinkCheckRow }) {
+  return (
+    <span
+      className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700 dark:bg-red-950 dark:text-red-300"
+      title={`Link check ${timeAgo(check.checked_at)}: ${check.detail ?? "ad no longer available"}${
+        check.gone_since ? ` (first seen gone ${new Date(check.gone_since).toLocaleDateString()})` : ""
+      }`}
+    >
+      Sold / removed
+    </span>
   );
 }

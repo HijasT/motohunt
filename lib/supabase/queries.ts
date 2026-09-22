@@ -4,7 +4,10 @@
 import { getSupabaseClient } from "./client";
 import type {
   AppStateValue,
+  BlockedModelRow,
+  LinkCheckRow,
   ListingRow,
+  RankingRow,
   SavedSearchRow,
   ScrapeStatus,
   SearchGroupRow,
@@ -225,4 +228,112 @@ export async function getScrapeStatus(): Promise<ScrapeStatus | null> {
   const { data, error } = await supabase.from("app_state").select("value").eq("key", "last_scrape").maybeSingle();
   if (error) throw error;
   return (data?.value as ScrapeStatus | undefined) ?? null;
+}
+
+// ---- Rankings -----------------------------------------------------------------------
+
+/** Unexpired ranks across all lists, best first within each. Ties (e.g. two written as #3) fall back to oldest first. */
+export async function fetchRankings(): Promise<RankingRow[]> {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("rankings")
+    .select("*")
+    .gt("expires_at", new Date().toISOString())
+    .order("rank", { ascending: true })
+    .order("ranked_at", { ascending: true });
+  if (error) throw error;
+  return data ?? [];
+}
+
+/** Starts a fresh 30-day window (expires_at defaults server-side). */
+export async function addRanking(
+  input: Pick<RankingRow, "list" | "link" | "rank" | "title" | "price" | "km">
+): Promise<void> {
+  const supabase = getSupabaseClient();
+  const { error } = await supabase.from("rankings").insert(input);
+  if (error) throw error;
+}
+
+/**
+ * Rewrites ranks as 1..n in the given order - pass one list's rows at a time. Only `rank` is sent, so each row's
+ * ranked_at/expires_at are untouched - reordering doesn't extend the 30 days.
+ */
+export async function setRankOrder(rows: Pick<RankingRow, "id">[]): Promise<void> {
+  const supabase = getSupabaseClient();
+  const results = await Promise.all(
+    rows.map((r, i) => supabase.from("rankings").update({ rank: i + 1 }).eq("id", r.id))
+  );
+  const failed = results.find((r) => r.error);
+  if (failed?.error) throw failed.error;
+}
+
+export async function removeRanking(id: string): Promise<void> {
+  const supabase = getSupabaseClient();
+  const { error } = await supabase.from("rankings").delete().eq("id", id);
+  if (error) throw error;
+}
+
+/** Puts back a deleted rank exactly as it was (same id, list, rank and 30-day window) - used by undo. */
+export async function restoreRanking(row: RankingRow): Promise<void> {
+  const supabase = getSupabaseClient();
+  const { error } = await supabase.from("rankings").insert(row);
+  if (error) throw error;
+}
+
+// ---- Favorite/hidden status snapshots (for undo) ------------------------------------
+
+export type StatusSnapshot = Map<string, "favorited" | "disliked" | null>;
+
+/** Current favorite/hidden status of each key, so an action on them can be undone exactly. */
+export async function snapshotStatuses(uniqueKeys: string[]): Promise<StatusSnapshot> {
+  const snapshot: StatusSnapshot = new Map(uniqueKeys.map((k) => [k, null]));
+  if (uniqueKeys.length === 0) return snapshot;
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("listing_status")
+    .select("listing_unique_key, status")
+    .in("listing_unique_key", uniqueKeys);
+  if (error) throw error;
+  for (const r of data ?? []) snapshot.set(r.listing_unique_key, r.status);
+  return snapshot;
+}
+
+export async function restoreStatuses(snapshot: StatusSnapshot): Promise<void> {
+  const byStatus = { favorited: [] as string[], disliked: [] as string[], none: [] as string[] };
+  for (const [key, status] of snapshot) byStatus[status ?? "none"].push(key);
+  if (byStatus.none.length) await clearListingStatus(byStatus.none);
+  if (byStatus.favorited.length) await setListingStatus(byStatus.favorited, "favorited");
+  if (byStatus.disliked.length) await setListingStatus(byStatus.disliked, "disliked");
+}
+
+// ---- Link checks ----------------------------------------------------------------------
+
+/** Latest "is this ad still up?" result per ad (see checkLinks.ts). Empty until the first check runs. */
+export async function fetchLinkChecks(): Promise<LinkCheckRow[]> {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase.from("link_checks").select("*");
+  if (error) throw error;
+  return data ?? [];
+}
+
+// ---- Blocked models -----------------------------------------------------------------
+
+export async function fetchBlockedModels(): Promise<BlockedModelRow[]> {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase.from("blocked_models").select("*").order("created_at", { ascending: false });
+  if (error) throw error;
+  return data ?? [];
+}
+
+export async function addBlockedModel(make: string, model: string | null): Promise<BlockedModelRow> {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase.from("blocked_models").insert({ make, model }).select().single();
+  if (error) throw error;
+  return data;
+}
+
+export async function removeBlockedModel(id: string): Promise<void> {
+  const supabase = getSupabaseClient();
+  const { error } = await supabase.from("blocked_models").delete().eq("id", id);
+  if (error) throw error;
 }

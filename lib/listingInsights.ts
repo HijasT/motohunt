@@ -1,7 +1,8 @@
 // Frontend-only, pure functions: things the UI derives from listing rows rather
 // than stores - duplicate grouping, deal scores, price changes and "not seen
 // lately" detection. No Supabase calls here; see lib/supabase/queries.ts.
-import type { ListingRow, ScrapeStatus } from "./supabase/types";
+import type { BlockedModelRow, ListingRow, ScrapeStatus } from "./supabase/types";
+import { normLink } from "./adLink";
 
 // ---- Duplicates ------------------------------------------------------------------
 
@@ -208,4 +209,27 @@ export function isProbablyGone(l: ListingRow, scrape: ScrapeStatus | null): bool
 /** A car listed on several sites is only gone once every copy is. */
 export function isGroupGone(g: ListingGroup, scrape: ScrapeStatus | null): boolean {
   return [g.primary, ...g.others].every((l) => isProbablyGone(l, scrape));
+}
+
+// ---- Rankings ---------------------------------------------------------------------------
+
+export { normLink };
+
+/** True if any copy of this car is currently ranked. */
+export function isGroupRanked(g: ListingGroup, rankedLinks: Set<string>): boolean {
+  return [g.primary, ...g.others].some((l) => rankedLinks.has(normLink(l.link)));
+}
+
+// ---- Blocked models ---------------------------------------------------------------------
+
+/** Same normalization as duplicate detection: "Renault Symbol" = "RENAULT SYMBOL" = "renault-symbol". */
+export function isBlocked(l: Pick<ListingRow, "make" | "model">, blocked: BlockedModelRow[]): boolean {
+  return blocked.some((b) => norm(b.make) === norm(l.make) && (b.model == null || norm(b.model) === norm(l.model)));
+}
+
+/** Is this exact make+model (or its whole make) already on the list? */
+export function findBlock(make: string, model: string | null, blocked: BlockedModelRow[]): BlockedModelRow | undefined {
+  return blocked.find(
+    (b) => norm(b.make) === norm(make) && (b.model == null || (model != null && norm(b.model) === norm(model)))
+  );
 }

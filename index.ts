@@ -5,7 +5,7 @@ import { toSearchFilters } from "./lib/supabase/savedSearchFilters.js";
 import type { SavedSearchRow, ScrapeSourceStatus, ScrapeStatus } from "./lib/supabase/types.js";
 import type { SearchFilters } from "./lib/types.js";
 import { runScrapersForMany, printSummary, type SearchRun } from "./lib/run.js";
-import { writeListings, cleanupExpired } from "./lib/supabaseWriter.js";
+import { writeListings, cleanupExpired, cleanupExpiredRankings } from "./lib/supabaseWriter.js";
 import { dedupeByLink } from "./lib/filters.js";
 
 async function loadSearches(admin: SupabaseClient): Promise<{ label: string; filters: SearchFilters }[]> {
@@ -64,6 +64,8 @@ async function main(admin: SupabaseClient, startedAt: number) {
 
   const purged = await cleanupExpired(admin);
   if (purged > 0) console.log(`Supabase: purged ${purged} expired listing(s).`);
+  const unranked = await cleanupExpiredRankings(admin);
+  if (unranked > 0) console.log(`Supabase: removed ${unranked} expired ranking(s).`);
 
   await writeScrapeStatus(admin, {
     at: new Date().toISOString(),

@@ -82,6 +82,72 @@ DESIGN.md flagged these directly or implied them; here's how each was resolved a
 - **"Not seen" listings** - flagged when the latest run finished >13h after the
   listing was last seen and its site didn't fail in that run.
 - **Edit saved searches** (Settings), **installable PWA** (`app/manifest.ts`, icons).
+- **Rank tab** - `supabase/migrations/20260923b_rankings.sql` + `…c_rankings_lists.sql`.
+  Several named lists (General, Above-Budget, High-Mileage/Budget, Dodge), unique
+  per (list, link), keyed by *ad link* (not unique_key) so they can be written from
+  outside the app - e.g. a claude.ai chat with the Supabase connector - and can hold
+  ads MotoHunt never scraped (title/price/km columns are their fallback display;
+  link may be null for text-only shares). Seeded 2026-09-23 with 27 cars from the
+  user's ranking chat.
+  Ranked cars are hidden from Favorites and Results; a rank lasts 30 days from
+  when it was first ranked (reordering doesn't extend it), then the car reappears
+  where it was. The scraper also deletes expired rank rows. Links are matched by
+  the site's ad id where there is one (`normLink` in `lib/listingInsights.ts`).
+
+- **Sold-ad detection** - `checkLinks.ts` (+ `lib/linkCheck.ts`,
+  `.github/workflows/check-links.yml`: daily 05:00 UAE, or Actions → "Check ad
+  links" → Run workflow) opens every ranked and favorited ad and writes
+  `link_checks` (migration `20260923d_link_checks.sql`). "gone" only on positive
+  evidence: 404/410, redirected off the ad, or "no longer available"-style text
+  (verified on CarSwitch; Dubizzle removed ads are real 404s - and an *old*
+  tracking-number URL of a live Dubizzle ad still loads, so a 404 isn't a stale
+  URL). Unreadable pages are "unknown" and never overwrite an earlier verdict.
+  The app tags gone ads "Sold / removed" (Rank + Favorites, sold favorites sort
+  first); removing them is manual. Cars24's sold-page wording is unverified -
+  it's only caught if it 404s/redirects or uses one of the generic phrases.
+- **Rank row actions** - "To favorites" (unrank; favorites the car even if it was
+  ranked straight from the chat - disabled for ads MotoHunt doesn't track) and
+  "Remove" (unrank + hide everywhere). Both undoable, restoring prior
+  favorite/hidden state. "Copy" / "Copy all lists" put WhatsApp-formatted text
+  (*bold* list names, numbered cars, links) on the clipboard.
+
+- **Blocked models** - `blocked_models` (migration `20260923e_blocked_models.sql`).
+  ⊘ on a result card blocks that make+model; Settings lists them (Unblock) and can
+  block a whole make. Filtered in the app at display time, not in the scraper, so
+  unblocking is instant and lossless. Matching uses the duplicate-grouping
+  normalization (case/punctuation-insensitive). Applies to Results only - never
+  hides favorites or ranked cars.
+
+- **Refresh button** (header) - reloads everything from Supabase (results, ranks,
+  link checks, blocks, scrape status) without contacting any car site; Results
+  keeps its search box/toggles across it.
+
+## Why most results are Dubizzle (as of 2026-09-23)
+
+Last scrape: Dubizzle 134, CarSwitch 1, Cars24 1, Automall 0, YallaMotors 0.
+- **CarSwitch / Cars24** only filter make/model server-side; price/km/year are
+  applied locally to a small first slice (CarSwitch: 5 pages × ~24 in default
+  order; Cars24: first server batch of ~15-40, no "load more"). A budget search
+  with no make ("Under 20") sees the first ~120 cars of the whole site, almost
+  none in range. Fix = find their server-side price/year params (or sort by
+  price) and implement Cars24's load-more fetch.
+- **Automall** is genuine: ~211 used cars, cheapest AED 27,995, median ~74k -
+  nothing matches the current searches.
+- **YallaMotors** is blocked from datacenter IPs; it now *fails* the run for that
+  source (was a silent green 0).
+- **Kavak** has no scraper (skipped at build time for stricter anti-bot).
+- The "Mitsubushi ASX" saved search has the make misspelled - matches nothing anywhere.
+
+## Known issue: Dubizzle duplicate rows
+
+Dubizzle ad URLs carry a per-visit tracking number
+(`…-2-957---<32-hex ad id>/` vs `…-2-395---<same id>/`), and `uniqueKeyFor()`
+hashes the full URL - so the same ad gets a new `listings` row on most scrapes.
+Consequences: duplicate cards (masked by the frontend's duplicate grouping), and
+price changes on Dubizzle ads land in a *new row* instead of updating
+`previous_price`, so drop detection misses them. Fix: key Dubizzle listings by
+the ad id, with a one-off SQL migration that re-keys existing `listings` and
+`listing_status` rows (favorites/hides are keyed by unique_key).
 
 ## What's next
 

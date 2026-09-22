@@ -151,6 +151,73 @@ create table app_state (
 );
 insert into app_state (key, value) values ('last_visit', '{"at": null}');
 
+-- rankings (Rank tab): an ordered shortlist of cars, each ranked for 30 days.
+--
+-- Keyed by the ad's URL rather than listings.unique_key so it can be written from
+-- outside the app (e.g. a claude.ai chat with the Supabase connector) with nothing
+-- but the link - and so a car MotoHunt never scraped can still be ranked; the
+-- title/price/km columns are the fallback display for those. The frontend matches
+-- ranks to listings by link (ignoring query string / trailing slash).
+--
+-- A ranked car is left out of Favorites and Results until its rank expires, at
+-- which point it simply reappears wherever it was before (Favorites if favorited).
+--
+-- To set or move a rank from SQL, keeping the original 30-day window:
+--   insert into rankings (list, link, rank, title, note)
+--   values ('General', 'https://...', 1, '2021 Nissan X-Trail SV', 'Best km for the price')
+--   on conflict (list, link) do update set rank = excluded.rank,
+--     title = coalesce(excluded.title, rankings.title),
+--     note = coalesce(excluded.note, rankings.note);
+
+create table rankings (
+  id uuid primary key default gen_random_uuid(),
+  list text not null default 'General',  -- e.g. General, Above-Budget, Dodge
+  link text,                             -- null for cars only ever shared as text
+  rank int not null,
+  title text,
+  price numeric,
+  km numeric,
+  note text,
+  ranked_at timestamptz not null default now(),
+  expires_at timestamptz not null default (now() + interval '30 days')
+);
+create index rankings_expires_at_idx on rankings (expires_at);
+-- One ad can be ranked in two lists (a Dodge in both General and Dodge).
+create unique index rankings_list_link_key on rankings (list, link);
+
+
+-- Is each ranked / favorited ad still up? Written by checkLinks.ts (GitHub
+-- Actions, daily + on demand), read by the app to tag sold/removed ads so they
+-- can be removed by hand. Keyed by the canonical ad key (lib/adLink.ts
+-- normLink), so every spelling of one ad's URL shares a single result.
+--
+-- status: 'ok'      - the ad page loaded normally
+--         'gone'    - 404/410, redirected off the ad, or the page says sold / no longer available
+--         'unknown' - couldn't tell (bot challenge, timeout, unexpected page) - treated as "not gone"
+
+create table link_checks (
+  link_key text primary key,
+  link text not null,
+  status text not null check (status in ('ok', 'gone', 'unknown')),
+  detail text,
+  checked_at timestamptz not null default now(),
+  -- First check that found it gone; kept while it stays gone.
+  gone_since timestamptz
+);
+
+-- Models (or whole makes) to leave out of search results, e.g. "never show me a
+-- Renault Symbol". Applied in the app at display time, not in the scraper, so
+-- unblocking brings every matching listing straight back. Matching ignores case
+-- and punctuation ("X-Trail" = "X TRAIL"). model = null blocks the whole make.
+-- Favorites and ranked cars are never hidden by this - those were chosen on purpose.
+
+create table blocked_models (
+  id uuid primary key default gen_random_uuid(),
+  make text not null,
+  model text,
+  created_at timestamptz not null default now()
+);
+
 -- RLS: this is a single-user app with no login (see DESIGN.md Auth section). The
 -- anon key is used from the browser and protected at the edge (Vercel password
 -- protection / shared secret), not per-row - so every policy below is a blanket
@@ -163,6 +230,9 @@ alter table search_group_members enable row level security;
 alter table listing_status enable row level security;
 alter table app_state enable row level security;
 alter table price_history enable row level security;
+alter table rankings enable row level security;
+alter table link_checks enable row level security;
+alter table blocked_models enable row level security;
 
 create policy "anon full access" on listings for all to anon using (true) with check (true);
 create policy "anon full access" on saved_searches for all to anon using (true) with check (true);
@@ -171,3 +241,6 @@ create policy "anon full access" on search_group_members for all to anon using (
 create policy "anon full access" on listing_status for all to anon using (true) with check (true);
 create policy "anon full access" on app_state for all to anon using (true) with check (true);
 create policy "anon read" on price_history for select to anon using (true);
+create policy "anon full access" on rankings for all to anon using (true) with check (true);
+create policy "anon read" on link_checks for select to anon using (true);
+create policy "anon full access" on blocked_models for all to anon using (true) with check (true);

@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
-import type { ListingRow, SavedSearchRow, ScrapeStatus } from "../../lib/supabase/types";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import type { BlockedModelRow, ListingRow, SavedSearchRow, ScrapeStatus } from "../../lib/supabase/types";
 import {
   clearListingStatus,
   fetchDisliked,
@@ -13,7 +13,16 @@ import { FilterBar } from "./FilterBar";
 import { describeSearch } from "./SavedSearchPicker";
 import { ScrapeHealth } from "./ScrapeHealth";
 import { ExternalIcon, PencilIcon, TrashIcon, UndoIcon } from "./icons";
-import { ErrorNote, errorMessage, formatNumber, ghostButtonClass, panelClass, useToast } from "./ui";
+import {
+  ErrorNote,
+  errorMessage,
+  formatNumber,
+  ghostButtonClass,
+  inputClass,
+  panelClass,
+  secondaryButtonClass,
+  useToast,
+} from "./ui";
 
 type Props = {
   savedSearches: SavedSearchRow[];
@@ -22,6 +31,9 @@ type Props = {
   onUpdateSearch: (id: string, input: SavedSearchInput) => Promise<void>;
   onDeleteSearch: (id: string) => Promise<void>;
   onDeleteGroup: (id: string) => Promise<void>;
+  blocked: BlockedModelRow[];
+  onBlock: (make: string, model: string | null) => Promise<void>;
+  onUnblock: (row: BlockedModelRow) => Promise<void>;
 };
 
 function Section({ title, hint, children }: { title: string; hint: string; children: ReactNode }) {
@@ -80,7 +92,17 @@ function DeleteButton({ label, onConfirm }: { label: string; onConfirm: () => Pr
   );
 }
 
-export function SettingsTab({ savedSearches, groups, scrape, onUpdateSearch, onDeleteSearch, onDeleteGroup }: Props) {
+export function SettingsTab({
+  savedSearches,
+  groups,
+  scrape,
+  onUpdateSearch,
+  onDeleteSearch,
+  onDeleteGroup,
+  blocked,
+  onBlock,
+  onUnblock,
+}: Props) {
   const { notify } = useToast();
   const [disliked, setDisliked] = useState<ListingRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -187,6 +209,36 @@ export function SettingsTab({ savedSearches, groups, scrape, onUpdateSearch, onD
       </Section>
 
       <div className="lg:col-span-2">
+        <Section
+          title="Blocked models"
+          hint="Never shown in search results, from any saved search. Favorites and ranked cars aren't affected."
+        >
+          <BlockForm onBlock={onBlock} />
+          {blocked.length === 0 ? (
+            <p className={emptyRowClass}>
+              Nothing blocked. Use the ⊘ button on a result to block its model, or add one above.
+            </p>
+          ) : (
+            <ul className={listClass}>
+              {blocked.map((b) => (
+                <li key={b.id} className={rowClass}>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-medium">
+                      {b.make} {b.model ?? <span className="font-normal text-neutral-500">(all models)</span>}
+                    </p>
+                    <p className="text-sm text-neutral-500">Blocked {new Date(b.created_at).toLocaleDateString()}</p>
+                  </div>
+                  <button className={ghostButtonClass} onClick={() => onUnblock(b)}>
+                    <UndoIcon /> Unblock
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Section>
+      </div>
+
+      <div className="lg:col-span-2">
         <Section title="Hidden listings" hint="Listings you hid from Results. Restore one to see it there again.">
           {error ? (
             <div className="p-4">
@@ -225,5 +277,40 @@ export function SettingsTab({ savedSearches, groups, scrape, onUpdateSearch, onD
         </Section>
       </div>
     </div>
+  );
+}
+
+function BlockForm({ onBlock }: { onBlock: (make: string, model: string | null) => Promise<void> }) {
+  const [make, setMake] = useState("");
+  const [model, setModel] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    if (!make.trim()) return;
+    setBusy(true);
+    try {
+      await onBlock(make.trim(), model.trim() || null);
+      setMake("");
+      setModel("");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="flex flex-col gap-2 border-b border-neutral-100 px-4 py-3 sm:flex-row dark:border-neutral-800">
+      <input className={`${inputClass} py-1.5`} placeholder="Make, e.g. Renault" value={make} onChange={(e) => setMake(e.target.value)} aria-label="Make to block" />
+      <input
+        className={`${inputClass} py-1.5`}
+        placeholder="Model, e.g. Symbol (empty = every model)"
+        value={model}
+        onChange={(e) => setModel(e.target.value)}
+        aria-label="Model to block"
+      />
+      <button type="submit" disabled={!make.trim() || busy} className={`${secondaryButtonClass} shrink-0`}>
+        Block
+      </button>
+    </form>
   );
 }

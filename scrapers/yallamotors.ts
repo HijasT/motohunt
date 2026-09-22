@@ -88,6 +88,10 @@ export async function scrapeYallaMotors(filters: SearchFilters): Promise<CarList
   const listings: CarListing[] = [];
 
   let lastError: string | null = null;
+  // Did any candidate URL load at all? "Loaded but no cars" is a real 0;
+  // "nothing loaded" (DNS/403/timeout on every shape) is a failure and must show
+  // up as one in the run status, not as a quiet green "0 listings".
+  let loadedAnyPage = false;
 
   try {
     // Settle on a URL shape using page 1, then stay on it for the rest.
@@ -100,7 +104,8 @@ export async function scrapeYallaMotors(filters: SearchFilters): Promise<CarList
       let vehicles: SchemaVehicle[] = [];
       for (const [i, url] of toTry.entries()) {
         try {
-          vehicles = extractVehicles(await readJsonLd(page, url));
+          vehicles = extractVehicles(await readJsonLd(page, url, 5000, true)); // a 403 is "unreachable", not "no cars"
+          loadedAnyPage = true;
         } catch (err) {
           lastError = err instanceof Error ? err.message : String(err); // DNS failure, 403, timeout - try the next shape
           continue;
@@ -121,6 +126,9 @@ export async function scrapeYallaMotors(filters: SearchFilters): Promise<CarList
       if (pageNum < MAX_PAGES) await sleep(2000);
     }
 
+    if (!loadedAnyPage) {
+      throw new Error(`YallaMotors unreachable - every URL shape failed${lastError ? `: ${lastError.slice(0, 200)}` : ""}`);
+    }
     if (listings.length === 0) {
       console.warn(
         `YallaMotors: no listings found. This scraper is unverified - check the URL shapes in scrapers/yallamotors.ts against the live site.${

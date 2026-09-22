@@ -58,6 +58,23 @@ export type ListingStatusRow = {
 
 export type AppStateValue = { at: string | null };
 
+/** supabase/migrations/20260923b_rankings.sql - keyed by ad link, not unique_key. */
+export type RankingRow = {
+  id: string;
+  /** Named list, e.g. "General", "Above-Budget", "Dodge". Rank is per list. */
+  list: string;
+  /** Null for cars that were only ever shared as text, with no ad URL. */
+  link: string | null;
+  rank: number;
+  /** Fallback display for ads MotoHunt hasn't scraped. */
+  title: string | null;
+  price: number | null;
+  km: number | null;
+  note: string | null;
+  ranked_at: string;
+  expires_at: string;
+};
+
 export type PriceHistoryRow = {
   id: number;
   listing_unique_key: string;
@@ -89,4 +106,24 @@ export type ScrapeStatus = {
 export type AppStateRow = {
   key: string;
   value: AppStateValue;
+};
+
+/** supabase/migrations/20260923d_link_checks.sql - written by checkLinks.ts. */
+export type LinkCheckRow = {
+  /** lib/adLink.ts normLink() of the ad URL. */
+  link_key: string;
+  link: string;
+  status: "ok" | "gone" | "unknown";
+  detail: string | null;
+  checked_at: string;
+  gone_since: string | null;
+};
+
+/** supabase/migrations/20260923e_blocked_models.sql - models kept out of search results. */
+export type BlockedModelRow = {
+  id: string;
+  make: string;
+  /** null = the whole make is blocked. */
+  model: string | null;
+  created_at: string;
 };

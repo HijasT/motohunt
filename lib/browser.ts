@@ -50,8 +50,15 @@ export function sleep(ms: number): Promise<void> {
  * stable contract than CSS classes - it's there for Google, so the sites have a
  * reason to keep it working. Prefer it over scraping rendered markup.
  */
-export async function readJsonLd(page: Page, url: string, settleMs = 5000): Promise<unknown[]> {
-  await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
+export async function readJsonLd(
+  page: Page,
+  url: string,
+  settleMs = 5000,
+  /** Throw on an HTTP 4xx/5xx instead of reading whatever error page came back. */
+  throwOnHttpError = false
+): Promise<unknown[]> {
+  const res = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
+  if (throwOnHttpError && res && res.status() >= 400) throw new Error(`HTTP ${res.status()} for ${url}`);
   await page.waitForTimeout(settleMs);
 
   const blocks = await page.$$eval('script[type="application/ld+json"]', (nodes) =>

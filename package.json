@@ -13,6 +13,7 @@
     "start": "next start",
     "scrape": "tsx index.ts",
     "verify": "tsx verify.ts",
+    "check-links": "tsx checkLinks.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

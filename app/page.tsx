@@ -6,17 +6,31 @@ import { SavedSearchPicker } from "./components/SavedSearchPicker";
 import { ResultsTab } from "./components/ResultsTab";
 import { FavoritesTab } from "./components/FavoritesTab";
 import { SettingsTab } from "./components/SettingsTab";
+import { GENERAL_LIST, RankTab } from "./components/RankTab";
 import { ScrapeStatusPill } from "./components/ScrapeHealth";
-import { CarIcon } from "./components/icons";
+import { CarIcon, RefreshIcon } from "./components/icons";
 import { CardGridSkeleton, ErrorNote, ToastProvider, errorMessage, focusRing, usePersistentState, useToast } from "./components/ui";
-import type { ListingRow, SavedSearchRow, ScrapeStatus } from "../lib/supabase/types";
-import { computeDeals } from "../lib/listingInsights";
+import type {
+  BlockedModelRow,
+  LinkCheckRow,
+  ListingRow,
+  RankingRow,
+  SavedSearchRow,
+  ScrapeStatus,
+} from "../lib/supabase/types";
+import { computeDeals, findBlock, normLink, type ListingGroup } from "../lib/listingInsights";
 import {
+  addBlockedModel,
+  addRanking,
+  fetchBlockedModels,
+  removeBlockedModel,
   createSavedSearch,
   createSearchGroup,
   deleteSavedSearch,
   deleteSearchGroup,
+  fetchLinkChecks,
   fetchMarketListings,
+  fetchRankings,
   fetchSavedSearches,
   fetchSearchGroups,
   getLastVisit,
@@ -27,16 +41,17 @@ import {
   type SearchGroupWithMembers,
 } from "../lib/supabase/queries";
 
-type Tab = "results" | "favorites" | "settings";
+type Tab = "results" | "rank" | "favorites" | "settings";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "results", label: "Results" },
+  { id: "rank", label: "Rank" },
   { id: "favorites", label: "Favorites" },
   { id: "settings", label: "Settings" },
 ];
 
 function tabClass(active: boolean): string {
-  return `relative rounded-lg px-2.5 py-1.5 sm:px-3 text-sm font-medium transition ${focusRing} ${
+  return `relative rounded-lg px-2 py-1.5 text-[13px] font-medium sm:px-3 sm:text-sm transition ${focusRing} ${
     active
       ? "bg-neutral-900 text-white dark:bg-white dark:text-neutral-900"
       : "text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
@@ -63,6 +78,50 @@ function App() {
   const [showNewSearch, setShowNewSearch] = useState(false);
   const [scrape, setScrape] = useState<ScrapeStatus | null>(null);
   const [market, setMarket] = useState<ListingRow[]>([]);
+  const [rankings, setRankings] = useState<RankingRow[]>([]);
+  const [rankingsError, setRankingsError] = useState<string | null>(null);
+  const [linkCheckRows, setLinkCheckRows] = useState<LinkCheckRow[]>([]);
+  const [blocked, setBlocked] = useState<BlockedModelRow[]>([]);
+  /** Bumped by the Refresh button; tabs refetch their own data when it changes. */
+  const [reloadKey, setReloadKey] = useState(0);
+  const [reloading, setReloading] = useState(false);
+
+  async function refreshRankings() {
+    try {
+      setRankings(await fetchRankings());
+      setRankingsError(null);
+    } catch (e) {
+      setRankingsError(errorMessage(e));
+    }
+  }
+
+  /** Everything besides saved searches. Failures just leave that feature's badges off. */
+  function loadSideData() {
+    return Promise.all([
+      getScrapeStatus().then(setScrape).catch(() => {}),
+      fetchMarketListings().then(setMarket).catch(() => {}),
+      refreshRankings(),
+      fetchLinkChecks().then(setLinkCheckRows).catch(() => {}),
+      fetchBlockedModels().then(setBlocked).catch(() => {}),
+    ]);
+  }
+
+  /**
+   * Reloads what MotoHunt already has in its database - new scrape results,
+   * ranks written from the chat, link-check results, blocks made on another
+   * device. It does NOT contact Dubizzle/CarSwitch/Cars24; that's the scheduled scrape.
+   */
+  async function reloadAll() {
+    setReloading(true);
+    try {
+      await Promise.all([refresh(), loadSideData()]);
+      setReloadKey((k) => k + 1);
+    } catch (e) {
+      notify(`Couldn't refresh: ${errorMessage(e)}`, { tone: "error" });
+    } finally {
+      setReloading(false);
+    }
+  }
 
   async function refresh() {
     const [searches, gs] = await Promise.all([fetchSavedSearches(), fetchSearchGroups()]);
@@ -73,8 +132,7 @@ function App() {
   useEffect(() => {
     // Nice-to-haves: the header status and deal scores. Neither blocks the page, and
     // failures just mean those badges don't show (e.g. before the migration runs).
-    getScrapeStatus().then(setScrape).catch(() => {});
-    fetchMarketListings().then(setMarket).catch(() => {});
+    void loadSideData();
 
     (async () => {
       try {
@@ -94,6 +152,63 @@ function App() {
   }, []);
 
   const deals = useMemo(() => computeDeals(market), [market]);
+  const linkChecks = useMemo(() => new Map(linkCheckRows.map((c) => [c.link_key, c])), [linkCheckRows]);
+  const rankedLinks = useMemo(
+    () => new Set(rankings.flatMap((r) => (r.link ? [normLink(r.link)] : []))),
+    [rankings]
+  );
+
+  async function handleBlock(make: string, model: string | null) {
+    const label = [make, model].filter(Boolean).join(" ");
+    const existing = findBlock(make, model, blocked);
+    if (existing) {
+      notify(`${label} is already blocked${existing.model == null ? ` (all ${existing.make})` : ""}`);
+      return;
+    }
+    try {
+      const row = await addBlockedModel(make, model);
+      setBlocked((prev) => [row, ...prev]);
+      notify(`${model ? label : `All ${make}`} hidden from results`, {
+        onUndo: async () => {
+          setBlocked((prev) => prev.filter((b) => b.id !== row.id));
+          await removeBlockedModel(row.id).catch((e) => notify(`Couldn't undo: ${errorMessage(e)}`, { tone: "error" }));
+        },
+      });
+    } catch (e) {
+      notify(`Couldn't block: ${errorMessage(e)}`, { tone: "error" });
+    }
+  }
+
+  async function handleUnblock(row: BlockedModelRow) {
+    setBlocked((prev) => prev.filter((b) => b.id !== row.id));
+    try {
+      await removeBlockedModel(row.id);
+      notify(`${[row.make, row.model].filter(Boolean).join(" ")} will show in results again`);
+    } catch (e) {
+      setBlocked((prev) => [row, ...prev]);
+      notify(`Couldn't unblock: ${errorMessage(e)}`, { tone: "error" });
+    }
+  }
+
+  async function handleRank(group: ListingGroup) {
+    const l = group.primary;
+    try {
+      // Ranking from Favorites always appends to the main list.
+      const rank = rankings.filter((r) => r.list === GENERAL_LIST).reduce((max, r) => Math.max(max, r.rank), 0) + 1;
+      await addRanking({
+        list: GENERAL_LIST,
+        link: l.link,
+        rank,
+        title: [l.year, l.make, l.model].filter(Boolean).join(" "),
+        price: l.price,
+        km: l.km,
+      });
+      await refreshRankings();
+      notify(`Ranked #${rank} in ${GENERAL_LIST} — moved to the Rank tab for 30 days`);
+    } catch (e) {
+      notify(`Couldn't rank: ${errorMessage(e)}`, { tone: "error" });
+    }
+  }
 
   // Ignore remembered selections whose saved search has since been deleted.
   const selectedIds = useMemo(() => {
@@ -150,8 +265,8 @@ function App() {
   return (
     <div className="min-h-screen">
       <header className="sticky top-0 z-40 border-b border-neutral-200 bg-white/80 backdrop-blur dark:border-neutral-800 dark:bg-neutral-950/80">
-        <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-3">
-          <div className="flex items-center gap-2">
+        <div className="mx-auto flex max-w-6xl items-center gap-2 px-4 py-3 sm:gap-3">
+          <div className="hidden items-center gap-2 min-[400px]:flex">
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-orange-500 text-white">
               <CarIcon className="h-5 w-5" />
             </span>
@@ -163,7 +278,18 @@ function App() {
           <div className="ml-auto">
             <ScrapeStatusPill scrape={scrape} onClick={() => setTab("settings")} />
           </div>
-          <nav className="flex gap-0.5 sm:gap-1" role="tablist" aria-label="Sections">
+          <div>
+            <button
+              onClick={reloadAll}
+              disabled={reloading || !loaded}
+              className={`flex h-8 w-8 items-center justify-center rounded-lg text-neutral-500 transition hover:bg-neutral-100 hover:text-neutral-900 disabled:opacity-50 dark:hover:bg-neutral-800 dark:hover:text-neutral-100 ${focusRing}`}
+              title="Refresh - reload results from MotoHunt's database (doesn't re-scrape the car sites)"
+              aria-label="Refresh"
+            >
+              <RefreshIcon className={`h-4 w-4 ${reloading ? "animate-spin" : ""}`} />
+            </button>
+          </div>
+          <nav className="flex min-w-0 gap-0.5 overflow-x-auto sm:gap-1" role="tablist" aria-label="Sections">
             {TABS.map((t) => (
               <button
                 key={t.id}
@@ -173,6 +299,9 @@ function App() {
                 onClick={() => setTab(t.id)}
               >
                 {t.label}
+                {t.id === "rank" && rankings.length > 0 && (
+                  <span className="ml-1 hidden tabular-nums opacity-60 sm:inline">{rankings.length}</span>
+                )}
               </button>
             ))}
           </nav>
@@ -199,23 +328,49 @@ function App() {
               newSearchOpen={showNewSearch}
             />
             <ResultsTab
+              reloadKey={reloadKey}
               selectedSearches={selectedSearches}
               lastVisit={lastVisit}
               onClearSelection={() => setSelected([])}
               deals={deals}
               scrape={scrape}
+              rankedLinks={rankedLinks}
+              blocked={blocked}
+              onBlock={handleBlock}
             />
           </div>
+        ) : tab === "rank" ? (
+          <RankTab
+            key={reloadKey}
+            rankings={rankings}
+            error={rankingsError}
+            market={market}
+            deals={deals}
+            scrape={scrape}
+            linkChecks={linkChecks}
+            onChanged={refreshRankings}
+          />
         ) : tab === "favorites" ? (
-          <FavoritesTab deals={deals} scrape={scrape} />
+          <FavoritesTab
+            key={reloadKey}
+            deals={deals}
+            scrape={scrape}
+            rankedLinks={rankedLinks}
+            onRank={handleRank}
+            linkChecks={linkChecks}
+          />
         ) : (
           <SettingsTab
+            key={reloadKey}
             savedSearches={savedSearches}
             groups={groups}
             scrape={scrape}
             onUpdateSearch={handleUpdateSearch}
             onDeleteSearch={handleDeleteSearch}
             onDeleteGroup={handleDeleteGroup}
+            blocked={blocked}
+            onBlock={handleBlock}
+            onUnblock={handleUnblock}
           />
         )}
       </main>

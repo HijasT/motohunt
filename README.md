@@ -110,6 +110,7 @@ supabase/
   migrations/              incremental upgrades for existing databases (already folded into schema.sql)
 index.ts                 scrape everything, write to Supabase   (npm run scrape)
 verify.ts                scrape everything, print it, write nothing   (npm run verify)
+checkLinks.ts            is each ranked/favorited ad still up?        (npm run check-links [-- --dry-run])
 lib/
   config.ts               sample filters - `npm run verify`'s input, and the
                            scrape fallback when no saved searches exist yet

@@ -1,0 +1,27 @@
+name: Check ad links
+
+# Opens every ranked and favorited ad and records whether it's still up
+# (see checkLinks.ts). Separate from the scrape so it can run on its own
+# schedule - and on demand: Actions tab -> "Check ad links" -> Run workflow.
+on:
+  schedule:
+    - cron: "0 1 * * *"   # daily, 05:00 UAE time
+  workflow_dispatch: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22   # same as scrape.yml - supabase-js needs native WebSocket
+
+      - run: npm install
+      - run: npx playwright install --with-deps chromium
+
+      - run: npm run check-links
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
