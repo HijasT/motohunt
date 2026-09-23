@@ -14,6 +14,8 @@ type Props = {
   gone?: boolean;
   /** Link check found the ad sold/removed - stronger than `gone`, shown instead of it. */
   sold?: LinkCheckRow;
+  /** Optional one-line context under the title, e.g. "Dropped from General (#10)". */
+  note?: ReactNode;
   actions?: ReactNode;
 };
 
@@ -77,7 +79,7 @@ function PriceLine({ listing }: { listing: ListingRow }) {
   );
 }
 
-export function ListingCard({ group, isNew, deal, gone, sold, actions }: Props) {
+export function ListingCard({ group, isNew, deal, gone, sold, note, actions }: Props) {
   const listing = group.primary;
   const title = [listing.make, listing.model].filter(Boolean).join(" ");
 
@@ -124,6 +126,7 @@ export function ListingCard({ group, isNew, deal, gone, sold, actions }: Props) 
             </a>
           </h3>
           <PriceLine listing={listing} />
+          {note && <p className="mt-1 text-xs font-medium text-orange-700 dark:text-orange-400">{note}</p>}
         </div>
 
         <div className="flex flex-wrap gap-1.5 tabular-nums">

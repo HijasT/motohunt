@@ -122,6 +122,16 @@ DESIGN.md flagged these directly or implied them; here's how each was resolved a
   link checks, blocks, scrape status) without contacting any car site; Results
   keeps its search box/toggles across it.
 
+- **Rank caps + drop-outs** - General holds 10, other lists 5 (`listLimit` in
+  RankTab.tsx). Ranking into a full list (page.tsx `handleRank`) pushes the
+  last car(s) out: they're favorited (if MotoHunt scrapes them) and recorded in
+  `rank_dropouts` (migration `20260924_rank_dropouts.sql`), which Favorites shows
+  as a "Dropped from ranking" section on top - including ads MotoHunt doesn't
+  scrape, from the saved rank details. Ranking a car again deletes its drop-out
+  row; the whole insert/evict is undoable. Lists written from outside the app
+  (the chat) can exceed the cap; the Rank tab flags "17/10 over the limit" and
+  the next in-app insert trims them. Caps are not enforced in SQL.
+
 ## Why most results are Dubizzle (as of 2026-09-23)
 
 Last scrape: Dubizzle 134, CarSwitch 1, Cars24 1, Automall 0, YallaMotors 0.

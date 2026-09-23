@@ -7,6 +7,7 @@ import type {
   BlockedModelRow,
   LinkCheckRow,
   ListingRow,
+  RankDropoutRow,
   RankingRow,
   SavedSearchRow,
   ScrapeStatus,
@@ -336,5 +337,52 @@ export async function addBlockedModel(make: string, model: string | null): Promi
 export async function removeBlockedModel(id: string): Promise<void> {
   const supabase = getSupabaseClient();
   const { error } = await supabase.from("blocked_models").delete().eq("id", id);
+  if (error) throw error;
+}
+
+// ---- Rank drop-outs -----------------------------------------------------------------
+
+export async function fetchRankDropouts(): Promise<RankDropoutRow[]> {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase.from("rank_dropouts").select("*").order("dropped_at", { ascending: false });
+  if (error) throw error;
+  return data ?? [];
+}
+
+/** Records cars that just fell out of a list (one row per ad link - dropping out again updates it). */
+export async function recordDropouts(rows: Omit<RankDropoutRow, "id" | "dropped_at">[]): Promise<RankDropoutRow[]> {
+  if (rows.length === 0) return [];
+  const supabase = getSupabaseClient();
+  const withLink = rows.filter((r) => r.link);
+  const withoutLink = rows.filter((r) => !r.link);
+  const saved: RankDropoutRow[] = [];
+  if (withLink.length) {
+    const { data, error } = await supabase
+      .from("rank_dropouts")
+      .upsert(withLink.map((r) => ({ ...r, dropped_at: new Date().toISOString() })), { onConflict: "link" })
+      .select();
+    if (error) throw error;
+    saved.push(...(data ?? []));
+  }
+  if (withoutLink.length) {
+    const { data, error } = await supabase.from("rank_dropouts").insert(withoutLink).select();
+    if (error) throw error;
+    saved.push(...(data ?? []));
+  }
+  return saved;
+}
+
+export async function deleteDropouts(ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  const supabase = getSupabaseClient();
+  const { error } = await supabase.from("rank_dropouts").delete().in("id", ids);
+  if (error) throw error;
+}
+
+/** Puts deleted drop-out rows back exactly (same ids) - used by undo. */
+export async function restoreDropouts(rows: RankDropoutRow[]): Promise<void> {
+  if (rows.length === 0) return;
+  const supabase = getSupabaseClient();
+  const { error } = await supabase.from("rank_dropouts").upsert(rows);
   if (error) throw error;
 }

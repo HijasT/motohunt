@@ -233,3 +233,12 @@ export function findBlock(make: string, model: string | null, blocked: BlockedMo
     (b) => norm(b.make) === norm(make) && (b.model == null || (model != null && norm(b.model) === norm(model)))
   );
 }
+
+/** Every copy's canonical link -> its duplicate group, for matching ranks to scraped listings. */
+export function groupsByLink(listings: ListingRow[]): Map<string, ListingGroup> {
+  const map = new Map<string, ListingGroup>();
+  for (const g of groupDuplicates(listings)) {
+    for (const l of [g.primary, ...g.others]) map.set(normLink(l.link), g);
+  }
+  return map;
+}

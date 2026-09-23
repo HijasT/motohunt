@@ -11,7 +11,7 @@ import {
   snapshotStatuses,
 } from "../../lib/supabase/queries";
 import {
-  groupDuplicates,
+  groupsByLink,
   isGroupGone,
   normLink,
   priceChange,
@@ -37,8 +37,10 @@ import {
 export const GENERAL_LIST = "General";
 /** Known lists render in this order; any other list name follows, alphabetically. */
 export const LIST_ORDER = [GENERAL_LIST, "Above-Budget", "High-Mileage/Budget", "Dodge"];
-/** The ranking chat keeps a top 8 in General and treats 9+ as reserve. */
-const GENERAL_TOP = 8;
+/** How many cars a list holds; ranking into a full list pushes the last one out (see page.tsx handleRank). */
+export function listLimit(list: string): number {
+  return list === GENERAL_LIST ? 10 : 5;
+}
 
 type Props = {
   rankings: RankingRow[];
@@ -127,13 +129,7 @@ export function RankTab({ rankings, error, market, deals, scrape, linkChecks, on
   const [rows, setRows] = useState(rankings);
   useEffect(() => setRows(rankings), [rankings]);
 
-  const groupByLink = useMemo(() => {
-    const map = new Map<string, ListingGroup>();
-    for (const g of groupDuplicates(market)) {
-      for (const l of [g.primary, ...g.others]) map.set(normLink(l.link), g);
-    }
-    return map;
-  }, [market]);
+  const groupByLink = useMemo(() => groupsByLink(market), [market]);
 
   // rows arrive sorted by rank, so each list's slice is already in order.
   const lists = useMemo(() => {
@@ -238,7 +234,10 @@ export function RankTab({ rankings, error, market, deals, scrape, linkChecks, on
     <div>
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div className="text-sm text-neutral-500">
-          <p>Best first in each list. Ranked cars are hidden from Favorites and Results; each rank lasts 30 days.</p>
+          <p>
+            Best first in each list — General holds 10, the others 5. Ranked cars are hidden from Favorites and Results;
+            each rank lasts 30 days.
+          </p>
           <p className="mt-0.5">
             {lastCheck ? (
               <>
@@ -281,9 +280,19 @@ export function RankTab({ rankings, error, market, deals, scrape, linkChecks, on
         {lists.map(([list, items]) => (
           <section key={list} id={slug(list)} className="scroll-mt-20">
             <div className="mb-3 flex items-center justify-between gap-3">
-              <h2 className="flex items-baseline gap-2 text-lg font-bold tracking-tight">
+              <h2 className="flex flex-wrap items-baseline gap-x-2 text-lg font-bold tracking-tight">
                 {list}
-                <span className="text-sm font-medium tabular-nums text-neutral-400">{items.length}</span>
+                <span className="text-sm font-medium tabular-nums text-neutral-400">
+                  {items.length}/{listLimit(list)}
+                </span>
+                {items.length > listLimit(list) && (
+                  <span
+                    className="text-xs font-medium text-amber-600 dark:text-amber-400"
+                    title="Written from outside the app (e.g. the chat). Ranking another car here trims it back to the limit."
+                  >
+                    over the limit — the next car ranked here trims it
+                  </span>
+                )}
               </h2>
               <button className={ghostButtonClass} onClick={() => copy(listAsText(list, items), list)}>
                 <CopyIcon /> Copy
@@ -297,7 +306,6 @@ export function RankTab({ rankings, error, market, deals, scrape, linkChecks, on
                   position={i + 1}
                   isFirst={i === 0}
                   isLast={i === items.length - 1}
-                  reserveStartsHere={list === GENERAL_LIST && i === GENERAL_TOP}
                   deals={deals}
                   scrape={scrape}
                   onUp={() => move(list, items, i, -1)}
@@ -319,7 +327,6 @@ type RowProps = {
   position: number;
   isFirst: boolean;
   isLast: boolean;
-  reserveStartsHere: boolean;
   deals: Map<string, Deal>;
   scrape: ScrapeStatus | null;
   onUp: () => void;
@@ -330,7 +337,7 @@ type RowProps = {
 
 const iconButton = `${ghostButtonClass} px-2 disabled:opacity-30`;
 
-function RankRow({ r, position, isFirst, isLast, reserveStartsHere, deals, scrape, onUp, onDown, onToFavorites, onRemove }: RowProps) {
+function RankRow({ r, position, isFirst, isLast, deals, scrape, onUp, onDown, onToFavorites, onRemove }: RowProps) {
   const { row, group, shown, title, price, km, sold } = r;
   const change = shown ? priceChange(shown) : null;
   const deal = shown ? deals.get(shown.unique_key) : undefined;
@@ -339,13 +346,6 @@ function RankRow({ r, position, isFirst, isLast, reserveStartsHere, deals, scrap
 
   return (
     <>
-      {reserveStartsHere && (
-        <li className="flex items-center gap-3 pt-2 text-xs font-semibold uppercase tracking-wider text-neutral-400" aria-hidden>
-          <span className="h-px flex-1 bg-neutral-200 dark:bg-neutral-800" />
-          Reserve
-          <span className="h-px flex-1 bg-neutral-200 dark:bg-neutral-800" />
-        </li>
-      )}
       <li className={`${panelClass} overflow-hidden ${sold ? "border-red-300 dark:border-red-900" : ""}`}>
         <div className="flex items-stretch gap-3 p-3 sm:gap-4 sm:p-4">
           <div

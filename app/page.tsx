@@ -6,7 +6,7 @@ import { SavedSearchPicker } from "./components/SavedSearchPicker";
 import { ResultsTab } from "./components/ResultsTab";
 import { FavoritesTab } from "./components/FavoritesTab";
 import { SettingsTab } from "./components/SettingsTab";
-import { RankTab } from "./components/RankTab";
+import { RankTab, listLimit } from "./components/RankTab";
 import { RankDialog } from "./components/RankDialog";
 import { ScrapeStatusPill } from "./components/ScrapeHealth";
 import { CarIcon, RefreshIcon } from "./components/icons";
@@ -15,14 +15,19 @@ import type {
   BlockedModelRow,
   LinkCheckRow,
   ListingRow,
+  RankDropoutRow,
   RankingRow,
   SavedSearchRow,
   ScrapeStatus,
 } from "../lib/supabase/types";
-import { computeDeals, findBlock, normLink, type ListingGroup } from "../lib/listingInsights";
+import { computeDeals, findBlock, groupsByLink, normLink, type ListingGroup } from "../lib/listingInsights";
 import {
   addBlockedModel,
   addRanking,
+  deleteDropouts,
+  fetchRankDropouts,
+  recordDropouts,
+  restoreDropouts,
   fetchBlockedModels,
   removeBlockedModel,
   createSavedSearch,
@@ -32,7 +37,12 @@ import {
   fetchLinkChecks,
   fetchMarketListings,
   fetchRankings,
+  removeRanking,
+  restoreRanking,
+  restoreStatuses,
+  setListingStatus,
   setRankOrder,
+  snapshotStatuses,
   fetchSavedSearches,
   fetchSearchGroups,
   getLastVisit,
@@ -84,6 +94,11 @@ function App() {
   const [rankingsError, setRankingsError] = useState<string | null>(null);
   const [linkCheckRows, setLinkCheckRows] = useState<LinkCheckRow[]>([]);
   const [blocked, setBlocked] = useState<BlockedModelRow[]>([]);
+  const [dropouts, setDropouts] = useState<RankDropoutRow[]>([]);
+
+  async function refreshDropouts() {
+    await fetchRankDropouts().then(setDropouts).catch(() => {});
+  }
   /** Bumped by the Refresh button; tabs refetch their own data when it changes. */
   const [reloadKey, setReloadKey] = useState(0);
   const [reloading, setReloading] = useState(false);
@@ -107,6 +122,7 @@ function App() {
       refreshRankings(),
       fetchLinkChecks().then(setLinkCheckRows).catch(() => {}),
       fetchBlockedModels().then(setBlocked).catch(() => {}),
+      refreshDropouts(),
     ]);
   }
 
@@ -194,11 +210,17 @@ function App() {
     }
   }
 
-  /** Inserts the car at `position` in `list`; cars from that slot down move one place lower. */
+  /**
+   * Inserts the car at `position` in `list`; cars from that slot down move one
+   * place lower. A list never grows past its limit (General 10, others 5): the
+   * car(s) pushed past it drop out of the ranking and back into Favorites.
+   * Undo puts the list back exactly as it was.
+   */
   async function handleRank(group: ListingGroup, list: string, position: number) {
     const l = group.primary;
+    const inList = rankings.filter((r) => r.list === list); // already sorted by rank
+    const limit = listLimit(list);
     try {
-      const inList = rankings.filter((r) => r.list === list); // already sorted by rank
       const row = await addRanking({
         list,
         link: l.link,
@@ -209,10 +231,57 @@ function App() {
       });
       const ordered = [...inList];
       ordered.splice(position - 1, 0, row);
-      await setRankOrder(ordered); // renumbers the whole list 1..n
-      await refreshRankings();
+      const kept = ordered.slice(0, limit);
+      const dropped = ordered.slice(limit);
+
+      // Dropped cars MotoHunt tracks become favorites (even ones ranked straight from
+      // the chat); snapshot their current status first so undo can restore it.
+      const byLink = groupsByLink(market);
+      const droppedKeys = dropped.flatMap((d) => (d.link ? byLink.get(normLink(d.link))?.keys ?? [] : []));
+      const snapshot = await snapshotStatuses(droppedKeys);
+      if (droppedKeys.length) await setListingStatus(droppedKeys, "favorited");
+      for (const d of dropped) await removeRanking(d.id);
+      await setRankOrder(kept); // renumbers the list 1..n
+
+      // Dropped cars go to Favorites' "Dropped from ranking" section; the car just
+      // ranked leaves it if it was there (it lives on the Rank tab now).
+      const newDropouts = await recordDropouts(
+        dropped.map((d) => ({
+          link: d.link,
+          list,
+          rank: ordered.indexOf(d) + 1,
+          title: d.title,
+          price: d.price,
+          km: d.km,
+          note: d.note,
+        }))
+      );
+      const groupKeys = new Set([l, ...group.others].map((x) => normLink(x.link)));
+      const clearedDropouts = dropouts.filter((d) => d.link && groupKeys.has(normLink(d.link)));
+      await deleteDropouts(clearedDropouts.map((d) => d.id));
+
+      await Promise.all([refreshRankings(), refreshDropouts()]);
+      setReloadKey((k) => k + 1); // Favorites refetches: newly favorited drop-outs appear
       setRankTarget(null);
-      notify(`Ranked #${position} in ${list} — moved to the Rank tab for 30 days`);
+      const droppedNote = dropped.length
+        ? ` · ${dropped.map((d) => d.title ?? "a car").join(", ")} dropped out → Favorites (Dropped from ranking)`
+        : "";
+      notify(`Ranked #${position} in ${list}${droppedNote}`, {
+        onUndo: async () => {
+          try {
+            await removeRanking(row.id);
+            for (const d of dropped) await restoreRanking(d);
+            await restoreStatuses(snapshot);
+            await setRankOrder(inList);
+            await deleteDropouts(newDropouts.map((d) => d.id));
+            await restoreDropouts(clearedDropouts);
+            await Promise.all([refreshRankings(), refreshDropouts()]);
+            setReloadKey((k) => k + 1);
+          } catch (e) {
+            notify(`Couldn't undo: ${errorMessage(e)}`, { tone: "error" });
+          }
+        },
+      });
     } catch (e) {
       await refreshRankings(); // show whatever did get saved, rather than a stale list
       notify(`Couldn't rank: ${errorMessage(e)}`, { tone: "error" });
@@ -367,6 +436,9 @@ function App() {
             rankedLinks={rankedLinks}
             onRank={setRankTarget}
             linkChecks={linkChecks}
+            dropouts={dropouts}
+            onDropoutsChanged={refreshDropouts}
+            market={market}
           />
         ) : (
           <SettingsTab

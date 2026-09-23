@@ -127,3 +127,17 @@ export type BlockedModelRow = {
   model: string | null;
   created_at: string;
 };
+
+/** supabase/migrations/20260924_rank_dropouts.sql - cars pushed out of a full rank list. */
+export type RankDropoutRow = {
+  id: string;
+  link: string | null;
+  /** The list it dropped out of, and its position just before. */
+  list: string;
+  rank: number | null;
+  title: string | null;
+  price: number | null;
+  km: number | null;
+  note: string | null;
+  dropped_at: string;
+};

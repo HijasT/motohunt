@@ -218,6 +218,25 @@ create table blocked_models (
   created_at timestamptz not null default now()
 );
 
+-- Cars pushed out of a full rank list (General holds 10, other lists 5). They
+-- show in their own "Dropped from ranking" section at the top of Favorites.
+-- Stores the rank's own title/price/km/link, so a dropped car MotoHunt doesn't
+-- scrape (e.g. a CarSwitch ad added from the chat) still appears there instead
+-- of vanishing. One row per ad; ranking the car again deletes its row.
+
+create table rank_dropouts (
+  id uuid primary key default gen_random_uuid(),
+  link text,
+  list text not null,           -- the list it dropped out of
+  rank int,                     -- its position just before it dropped
+  title text,
+  price numeric,
+  km numeric,
+  note text,
+  dropped_at timestamptz not null default now()
+);
+create unique index rank_dropouts_link_key on rank_dropouts (link);
+
 -- RLS: this is a single-user app with no login (see DESIGN.md Auth section). The
 -- anon key is used from the browser and protected at the edge (Vercel password
 -- protection / shared secret), not per-row - so every policy below is a blanket
@@ -233,6 +252,7 @@ alter table price_history enable row level security;
 alter table rankings enable row level security;
 alter table link_checks enable row level security;
 alter table blocked_models enable row level security;
+alter table rank_dropouts enable row level security;
 
 create policy "anon full access" on listings for all to anon using (true) with check (true);
 create policy "anon full access" on saved_searches for all to anon using (true) with check (true);
@@ -244,3 +264,4 @@ create policy "anon read" on price_history for select to anon using (true);
 create policy "anon full access" on rankings for all to anon using (true) with check (true);
 create policy "anon read" on link_checks for select to anon using (true);
 create policy "anon full access" on blocked_models for all to anon using (true) with check (true);
+create policy "anon full access" on rank_dropouts for all to anon using (true) with check (true);
