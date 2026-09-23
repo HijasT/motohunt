@@ -245,13 +245,14 @@ export async function fetchRankings(): Promise<RankingRow[]> {
   return data ?? [];
 }
 
-/** Starts a fresh 30-day window (expires_at defaults server-side). */
+/** Starts a fresh 30-day window (expires_at defaults server-side). Returns the new row. */
 export async function addRanking(
   input: Pick<RankingRow, "list" | "link" | "rank" | "title" | "price" | "km">
-): Promise<void> {
+): Promise<RankingRow> {
   const supabase = getSupabaseClient();
-  const { error } = await supabase.from("rankings").insert(input);
+  const { data, error } = await supabase.from("rankings").insert(input).select().single();
   if (error) throw error;
+  return data;
 }
 
 /**

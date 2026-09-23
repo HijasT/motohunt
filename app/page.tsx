@@ -6,7 +6,8 @@ import { SavedSearchPicker } from "./components/SavedSearchPicker";
 import { ResultsTab } from "./components/ResultsTab";
 import { FavoritesTab } from "./components/FavoritesTab";
 import { SettingsTab } from "./components/SettingsTab";
-import { GENERAL_LIST, RankTab } from "./components/RankTab";
+import { RankTab } from "./components/RankTab";
+import { RankDialog } from "./components/RankDialog";
 import { ScrapeStatusPill } from "./components/ScrapeHealth";
 import { CarIcon, RefreshIcon } from "./components/icons";
 import { CardGridSkeleton, ErrorNote, ToastProvider, errorMessage, focusRing, usePersistentState, useToast } from "./components/ui";
@@ -31,6 +32,7 @@ import {
   fetchLinkChecks,
   fetchMarketListings,
   fetchRankings,
+  setRankOrder,
   fetchSavedSearches,
   fetchSearchGroups,
   getLastVisit,
@@ -85,6 +87,8 @@ function App() {
   /** Bumped by the Refresh button; tabs refetch their own data when it changes. */
   const [reloadKey, setReloadKey] = useState(0);
   const [reloading, setReloading] = useState(false);
+  /** Favorite being ranked - the dialog asks for its list and position. */
+  const [rankTarget, setRankTarget] = useState<ListingGroup | null>(null);
 
   async function refreshRankings() {
     try {
@@ -190,22 +194,27 @@ function App() {
     }
   }
 
-  async function handleRank(group: ListingGroup) {
+  /** Inserts the car at `position` in `list`; cars from that slot down move one place lower. */
+  async function handleRank(group: ListingGroup, list: string, position: number) {
     const l = group.primary;
     try {
-      // Ranking from Favorites always appends to the main list.
-      const rank = rankings.filter((r) => r.list === GENERAL_LIST).reduce((max, r) => Math.max(max, r.rank), 0) + 1;
-      await addRanking({
-        list: GENERAL_LIST,
+      const inList = rankings.filter((r) => r.list === list); // already sorted by rank
+      const row = await addRanking({
+        list,
         link: l.link,
-        rank,
+        rank: position,
         title: [l.year, l.make, l.model].filter(Boolean).join(" "),
         price: l.price,
         km: l.km,
       });
+      const ordered = [...inList];
+      ordered.splice(position - 1, 0, row);
+      await setRankOrder(ordered); // renumbers the whole list 1..n
       await refreshRankings();
-      notify(`Ranked #${rank} in ${GENERAL_LIST} — moved to the Rank tab for 30 days`);
+      setRankTarget(null);
+      notify(`Ranked #${position} in ${list} — moved to the Rank tab for 30 days`);
     } catch (e) {
+      await refreshRankings(); // show whatever did get saved, rather than a stale list
       notify(`Couldn't rank: ${errorMessage(e)}`, { tone: "error" });
     }
   }
@@ -356,7 +365,7 @@ function App() {
             deals={deals}
             scrape={scrape}
             rankedLinks={rankedLinks}
-            onRank={handleRank}
+            onRank={setRankTarget}
             linkChecks={linkChecks}
           />
         ) : (
@@ -374,6 +383,15 @@ function App() {
           />
         )}
       </main>
+
+      {rankTarget && (
+        <RankDialog
+          group={rankTarget}
+          rankings={rankings}
+          onCancel={() => setRankTarget(null)}
+          onConfirm={(list, position) => handleRank(rankTarget, list, position)}
+        />
+      )}
     </div>
   );
 }

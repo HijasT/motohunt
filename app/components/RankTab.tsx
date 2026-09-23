@@ -33,10 +33,10 @@ import {
   useToast,
 } from "./ui";
 
-/** The main list; ranking from Favorites appends here. */
+/** The main list - the default choice in the rank dialog. */
 export const GENERAL_LIST = "General";
 /** Known lists render in this order; any other list name follows, alphabetically. */
-const LIST_ORDER = [GENERAL_LIST, "Above-Budget", "High-Mileage/Budget", "Dodge"];
+export const LIST_ORDER = [GENERAL_LIST, "Above-Budget", "High-Mileage/Budget", "Dodge"];
 /** The ranking chat keeps a top 8 in General and treats 9+ as reserve. */
 const GENERAL_TOP = 8;
 

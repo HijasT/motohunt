@@ -13,7 +13,8 @@ type Props = {
   scrape: ScrapeStatus | null;
   /** Normalized links of currently ranked ads - those live on the Rank tab instead. */
   rankedLinks: Set<string>;
-  onRank: (group: ListingGroup) => Promise<void>;
+  /** Opens the "which list, which position?" dialog. */
+  onRank: (group: ListingGroup) => void;
   /** Latest link-check result per normLink key. */
   linkChecks: Map<string, LinkCheckRow>;
 };
@@ -49,7 +50,6 @@ export function FavoritesTab({ deals, scrape, rankedLinks, onRank, linkChecks }:
     [allGroups, rankedLinks, linkChecks]
   );
   const rankedCount = allGroups.length - groups.length;
-  const [ranking, setRanking] = useState<string | null>(null);
   const goneCount = groups.filter((g) => isGroupGone(g, scrape)).length;
   const dropCount = groups.filter((g) => (priceChange(g.primary)?.delta ?? 0) < 0).length;
   const soldCount = groups.filter((g) => soldCheck(g, linkChecks)).length;
@@ -174,16 +174,8 @@ export function FavoritesTab({ deals, scrape, rankedLinks, onRank, linkChecks }:
                 ) : (
                 <button
                   className={`${ghostButtonClass} hover:!text-orange-600`}
-                  disabled={ranking === group.primary.unique_key}
-                  onClick={async () => {
-                    setRanking(group.primary.unique_key);
-                    try {
-                      await onRank(group);
-                    } finally {
-                      setRanking(null);
-                    }
-                  }}
-                  title="Add to the bottom of your Rank list (30 days)"
+                  onClick={() => onRank(group)}
+                  title="Rank it - choose the list and position (30 days)"
                 >
                   <TrophyIcon /> Rank
                 </button>
