@@ -8,11 +8,11 @@ import {
   type SavedSearchInput,
   type SearchGroupWithMembers,
 } from "../../lib/supabase/queries";
-import { groupDuplicates, type ListingGroup } from "../../lib/listingInsights";
+import { carKey, groupDuplicates, type ListingGroup } from "../../lib/listingInsights";
 import { FilterBar } from "./FilterBar";
 import { describeSearch } from "./SavedSearchPicker";
 import { ScrapeHealth } from "./ScrapeHealth";
-import { ChevronIcon, ExternalIcon, PencilIcon, TrashIcon, UndoIcon, XIcon } from "./icons";
+import { ChevronIcon, ExternalIcon, PencilIcon, SearchIcon, TrashIcon, UndoIcon, XIcon } from "./icons";
 import {
   ErrorNote,
   errorMessage,
@@ -214,42 +214,7 @@ export function SettingsTab({
       </div>
 
       <div className="lg:col-span-2">
-        <Section title="Hidden listings" hint="Listings you hid from Results. Restore one to see it there again.">
-          {error ? (
-            <div className="p-4">
-              <ErrorNote>{error}</ErrorNote>
-            </div>
-          ) : disliked === null ? (
-            <p className={emptyRowClass}>Loading…</p>
-          ) : hiddenGroups.length === 0 ? (
-            <p className={emptyRowClass}>Nothing hidden.</p>
-          ) : (
-            <ul className={listClass}>
-              {hiddenGroups.map((g) => {
-                const l = g.primary;
-                return (
-                <li key={l.unique_key} className={rowClass}>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate font-medium">
-                      {l.year ?? ""} {l.make} {l.model}
-                    </p>
-                    <p className="truncate text-sm tabular-nums text-neutral-500">
-                      {[...new Set([l, ...g.others].map((x) => x.source))].join(" + ")} · AED {formatNumber(l.price)} ·{" "}
-                      {formatNumber(l.km)} km
-                    </p>
-                  </div>
-                  <a href={l.link} target="_blank" rel="noreferrer" className={ghostButtonClass} aria-label="View ad">
-                    <ExternalIcon />
-                  </a>
-                  <button className={ghostButtonClass} onClick={() => handleUnhide(g)}>
-                    <UndoIcon /> Restore
-                  </button>
-                </li>
-                );
-              })}
-            </ul>
-          )}
-        </Section>
+        <HiddenListings groups={hiddenGroups} loading={disliked === null} error={error} onRestore={handleUnhide} />
       </div>
     </div>
   );
@@ -290,6 +255,12 @@ function BlockForm({ onBlock }: { onBlock: (make: string, model: string | null) 
   );
 }
 
+/** Of two spellings of one name, prefer "Kia" over "KIA" (sites differ in capitalisation). */
+function nicerName(current: string, candidate: string): string {
+  const shouting = (m: string) => m === m.toUpperCase() && m !== m.toLowerCase();
+  return shouting(current) && !shouting(candidate) ? candidate : current;
+}
+
 /** Case/spacing-insensitive make key, so "Renault" and "RENAULT" land in one group. */
 const makeKey = (make: string) => make.trim().toLowerCase();
 
@@ -313,9 +284,7 @@ function BlockedModels({
     for (const b of blocked) {
       const key = makeKey(b.make);
       const g = groups.get(key) ?? { make: b.make.trim(), rows: [] };
-      // Prefer "Kia" over "KIA" for the heading when both spellings were blocked.
-      const isShouting = (m: string) => m === m.toUpperCase() && m !== m.toLowerCase();
-      if (isShouting(g.make) && !isShouting(b.make.trim())) g.make = b.make.trim();
+      g.make = nicerName(g.make, b.make.trim());
       g.rows.push(b);
       groups.set(key, g);
     }
@@ -387,6 +356,186 @@ function BlockedModels({
                 </div>
               ))}
             </div>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+type HiddenModel = { key: string; model: string; cars: ListingGroup[] };
+type HiddenMake = { key: string; make: string; count: number; models: HiddenModel[] };
+
+/**
+ * Hidden listings grouped make (A-Z) -> model (A-Z) -> cars (newest year, then
+ * cheapest). Each model is a collapsible row with its count; the search box
+ * filters by make/model/year/source and opens every model that still matches.
+ * The whole section collapses too (remembered).
+ */
+function HiddenListings({
+  groups,
+  loading,
+  error,
+  onRestore,
+}: {
+  groups: ListingGroup[];
+  loading: boolean;
+  error: string | null;
+  onRestore: (g: ListingGroup) => void;
+}) {
+  const [open, setOpen] = usePersistentState("motohunt.hiddenOpen", false);
+  const [query, setQuery] = useState("");
+
+  const makes = useMemo<HiddenMake[]>(() => {
+    const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+    const matches = (g: ListingGroup) => {
+      if (words.length === 0) return true;
+      const text = [g.primary, ...g.others]
+        .map((l) => `${l.year ?? ""} ${l.make} ${l.model} ${l.source}`)
+        .join(" ")
+        .toLowerCase();
+      return words.every((w) => text.includes(w));
+    };
+
+    const byMake = new Map<string, { make: string; models: Map<string, HiddenModel> }>();
+    for (const g of groups.filter(matches)) {
+      const l = g.primary;
+      const key = carKey(l); // "nissan|xtrail" - ignores case and punctuation
+      const mKey = key.split("|")[0];
+      const make = byMake.get(mKey) ?? { make: l.make.trim(), models: new Map<string, HiddenModel>() };
+      make.make = nicerName(make.make, l.make.trim());
+      const model = make.models.get(key) ?? { key, model: l.model.trim(), cars: [] };
+      model.model = nicerName(model.model, l.model.trim());
+      model.cars.push(g);
+      make.models.set(key, model);
+      byMake.set(mKey, make);
+    }
+
+    return [...byMake.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, m]) => {
+        const models = [...m.models.values()]
+          .sort((a, b) => a.key.localeCompare(b.key))
+          .map((mo) => ({
+            ...mo,
+            cars: mo.cars.sort(
+              (a, b) => (b.primary.year ?? 0) - (a.primary.year ?? 0) || (a.primary.price ?? Infinity) - (b.primary.price ?? Infinity)
+            ),
+          }));
+        return { key, make: m.make, count: models.reduce((n, mo) => n + mo.cars.length, 0), models };
+      });
+  }, [groups, query]);
+
+  const searching = query.trim() !== "";
+  const shown = makes.reduce((n, m) => n + m.count, 0);
+
+  return (
+    <section className={`${panelClass} overflow-hidden`}>
+      <button
+        onClick={() => setOpen(!open)}
+        aria-expanded={open}
+        className="flex w-full items-start gap-3 px-4 py-3 text-left hover:bg-neutral-50 dark:hover:bg-neutral-800/40"
+      >
+        <ChevronIcon className={`mt-1 h-4 w-4 shrink-0 text-neutral-400 transition-transform ${open ? "rotate-90" : ""}`} />
+        <div className="min-w-0 flex-1">
+          <h2 className="flex items-baseline gap-2 font-semibold">
+            Hidden listings
+            {!loading && (
+              <span className="text-sm font-medium tabular-nums text-neutral-400">
+                {groups.length} · {new Set(groups.map((g) => carKey(g.primary))).size} models
+              </span>
+            )}
+          </h2>
+          <p className="text-sm text-neutral-500">Listings you hid or removed. Restore one to see it in Results again.</p>
+        </div>
+      </button>
+
+      {open && (
+        <div className="border-t border-neutral-100 dark:border-neutral-800">
+          {error ? (
+            <div className="p-4">
+              <ErrorNote>{error}</ErrorNote>
+            </div>
+          ) : loading ? (
+            <p className={emptyRowClass}>Loading…</p>
+          ) : groups.length === 0 ? (
+            <p className={emptyRowClass}>Nothing hidden.</p>
+          ) : (
+            <>
+              <div className="border-b border-neutral-100 px-4 py-3 dark:border-neutral-800">
+                <div className="relative">
+                  <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-neutral-400">
+                    <SearchIcon />
+                  </span>
+                  <input
+                    type="search"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder="Search hidden cars — e.g. “x-trail 2021” or “dubizzle”"
+                    aria-label="Search hidden cars"
+                    className={`${inputClass} py-1.5 pl-9`}
+                  />
+                </div>
+                {searching && (
+                  <p className="mt-1.5 text-xs text-neutral-500">
+                    {shown} of {groups.length} match
+                  </p>
+                )}
+              </div>
+              {makes.length === 0 ? (
+                <p className={emptyRowClass}>No hidden cars match “{query}”.</p>
+              ) : (
+                <div className={listClass}>
+                  {makes.map((m) => (
+                    <div key={m.key} className="px-4 py-3">
+                      <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-neutral-500">
+                        {m.make} <span className="font-medium text-neutral-400">{m.count}</span>
+                      </h3>
+                      <div className="space-y-1.5">
+                        {m.models.map((mo) => (
+                          // Remount on search so matching models open, and close again when cleared.
+                          <details
+                            key={`${mo.key}-${searching}`}
+                            open={searching}
+                            className="group rounded-lg border border-neutral-100 dark:border-neutral-800"
+                          >
+                            <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-sm font-medium hover:bg-neutral-50 dark:hover:bg-neutral-800/40 [&::-webkit-details-marker]:hidden">
+                              <ChevronIcon className="h-3.5 w-3.5 shrink-0 text-neutral-400 transition-transform group-open:rotate-90" />
+                              {mo.model}
+                              <span className="font-normal tabular-nums text-neutral-400">{mo.cars.length}</span>
+                            </summary>
+                            <ul className="divide-y divide-neutral-100 border-t border-neutral-100 dark:divide-neutral-800 dark:border-neutral-800">
+                              {mo.cars.map((g) => {
+                                const l = g.primary;
+                                return (
+                                  <li key={l.unique_key} className="flex items-center gap-3 px-3 py-2">
+                                    <div className="min-w-0 flex-1">
+                                      <p className="truncate text-sm font-medium tabular-nums">
+                                        {l.year ?? "—"} · AED {formatNumber(l.price)} · {formatNumber(l.km)} km
+                                      </p>
+                                      <p className="truncate text-xs text-neutral-500">
+                                        {[...new Set([l, ...g.others].map((x) => x.source))].join(" + ")}
+                                        {l.description ? ` · ${l.description}` : ""}
+                                      </p>
+                                    </div>
+                                    <a href={l.link} target="_blank" rel="noreferrer" className={ghostButtonClass} aria-label="View ad">
+                                      <ExternalIcon />
+                                    </a>
+                                    <button className={ghostButtonClass} onClick={() => onRestore(g)}>
+                                      <UndoIcon /> Restore
+                                    </button>
+                                  </li>
+                                );
+                              })}
+                            </ul>
+                          </details>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
           )}
         </div>
       )}
