@@ -1,7 +1,7 @@
 // Frontend-only, pure functions: things the UI derives from listing rows rather
 // than stores - duplicate grouping, deal scores, price changes and "not seen
 // lately" detection. No Supabase calls here; see lib/supabase/queries.ts.
-import type { BlockedModelRow, ListingRow, ScrapeStatus } from "./supabase/types";
+import type { BlockedModelRow, ListingRow, RankDropoutRow, ScrapeStatus } from "./supabase/types";
 import { normLink } from "./adLink";
 
 // ---- Duplicates ------------------------------------------------------------------
@@ -241,4 +241,46 @@ export function groupsByLink(listings: ListingRow[]): Map<string, ListingGroup> 
     for (const l of [g.primary, ...g.others]) map.set(normLink(l.link), g);
   }
   return map;
+}
+
+// ---- Rank candidates ------------------------------------------------------------------
+
+/**
+ * A car about to be ranked. Usually a scraped favorite, but a dropped-out car
+ * MotoHunt doesn't scrape (e.g. a CarSwitch ad from the chat) can be ranked
+ * again too, from the details saved with its old rank.
+ */
+export type RankCandidate = {
+  link: string | null;
+  title: string;
+  price: number | null;
+  km: number | null;
+  note: string | null;
+  /** Every URL this car is known by (duplicate copies) - used to clear its drop-out record. */
+  links: string[];
+};
+
+export function candidateFromGroup(g: ListingGroup): RankCandidate {
+  const l = g.primary;
+  return {
+    link: l.link,
+    title: [l.year, l.make, l.model].filter(Boolean).join(" "),
+    price: l.price,
+    km: l.km,
+    note: null,
+    links: [g.primary, ...g.others].map((x) => x.link),
+  };
+}
+
+/** Re-ranks the exact ad that dropped out, keeping its title/note; live price/km win if it's scraped. */
+export function candidateFromDropout(row: RankDropoutRow, g: ListingGroup | undefined): RankCandidate {
+  const live = g && row.link ? [g.primary, ...g.others].find((l) => normLink(l.link) === normLink(row.link!)) : undefined;
+  return {
+    link: row.link,
+    title: row.title ?? (g ? candidateFromGroup(g).title : "Car"),
+    price: live?.price ?? row.price,
+    km: live?.km ?? row.km,
+    note: row.note,
+    links: [...(row.link ? [row.link] : []), ...(g ? [g.primary, ...g.others].map((x) => x.link) : [])],
+  };
 }

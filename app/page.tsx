@@ -20,7 +20,7 @@ import type {
   SavedSearchRow,
   ScrapeStatus,
 } from "../lib/supabase/types";
-import { computeDeals, findBlock, groupsByLink, normLink, type ListingGroup } from "../lib/listingInsights";
+import { computeDeals, findBlock, groupsByLink, normLink, type RankCandidate } from "../lib/listingInsights";
 import {
   addBlockedModel,
   addRanking,
@@ -103,7 +103,7 @@ function App() {
   const [reloadKey, setReloadKey] = useState(0);
   const [reloading, setReloading] = useState(false);
   /** Favorite being ranked - the dialog asks for its list and position. */
-  const [rankTarget, setRankTarget] = useState<ListingGroup | null>(null);
+  const [rankTarget, setRankTarget] = useState<RankCandidate | null>(null);
 
   async function refreshRankings() {
     try {
@@ -216,18 +216,18 @@ function App() {
    * car(s) pushed past it drop out of the ranking and back into Favorites.
    * Undo puts the list back exactly as it was.
    */
-  async function handleRank(group: ListingGroup, list: string, position: number) {
-    const l = group.primary;
+  async function handleRank(car: RankCandidate, list: string, position: number) {
     const inList = rankings.filter((r) => r.list === list); // already sorted by rank
     const limit = listLimit(list);
     try {
       const row = await addRanking({
         list,
-        link: l.link,
+        link: car.link,
         rank: position,
-        title: [l.year, l.make, l.model].filter(Boolean).join(" "),
-        price: l.price,
-        km: l.km,
+        title: car.title,
+        price: car.price,
+        km: car.km,
+        note: car.note,
       });
       const ordered = [...inList];
       ordered.splice(position - 1, 0, row);
@@ -256,8 +256,8 @@ function App() {
           note: d.note,
         }))
       );
-      const groupKeys = new Set([l, ...group.others].map((x) => normLink(x.link)));
-      const clearedDropouts = dropouts.filter((d) => d.link && groupKeys.has(normLink(d.link)));
+      const carKeys = new Set(car.links.map(normLink));
+      const clearedDropouts = dropouts.filter((d) => d.link && carKeys.has(normLink(d.link)));
       await deleteDropouts(clearedDropouts.map((d) => d.id));
 
       await Promise.all([refreshRankings(), refreshDropouts()]);
@@ -458,7 +458,7 @@ function App() {
 
       {rankTarget && (
         <RankDialog
-          group={rankTarget}
+          car={rankTarget}
           rankings={rankings}
           onCancel={() => setRankTarget(null)}
           onConfirm={(list, position) => handleRank(rankTarget, list, position)}

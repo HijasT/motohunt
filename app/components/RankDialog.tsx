@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type { RankingRow } from "../../lib/supabase/types";
-import type { ListingGroup } from "../../lib/listingInsights";
+import type { RankCandidate } from "../../lib/listingInsights";
 import { GENERAL_LIST, LIST_ORDER, listLimit } from "./RankTab";
 import { XIcon } from "./icons";
 import { formatNumber, ghostButtonClass, inputClass, panelClass, primaryButtonClass } from "./ui";
@@ -10,7 +10,7 @@ import { formatNumber, ghostButtonClass, inputClass, panelClass, primaryButtonCl
 const NEW_LIST = "__new__";
 
 type Props = {
-  group: ListingGroup;
+  car: RankCandidate;
   /** Current (unexpired) ranks across all lists, sorted by rank. */
   rankings: RankingRow[];
   onCancel: () => void;
@@ -21,9 +21,8 @@ type Props = {
 const labelClass = "block text-xs font-medium text-neutral-600 dark:text-neutral-400";
 
 /** Asks where a favorite goes: which list, and which position in it. */
-export function RankDialog({ group, rankings, onCancel, onConfirm }: Props) {
-  const car = group.primary;
-  const carTitle = [car.year, car.make, car.model].filter(Boolean).join(" ");
+export function RankDialog({ car, rankings, onCancel, onConfirm }: Props) {
+  const carTitle = car.title;
 
   // The chat's lists first (even if currently empty), then any others that exist.
   const lists = useMemo(() => {

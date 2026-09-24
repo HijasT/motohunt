@@ -11,6 +11,8 @@ import {
   snapshotStatuses,
 } from "../../lib/supabase/queries";
 import {
+  candidateFromDropout,
+  candidateFromGroup,
   groupDuplicates,
   groupsByLink,
   isGroupGone,
@@ -19,6 +21,7 @@ import {
   priceChange,
   type Deal,
   type ListingGroup,
+  type RankCandidate,
 } from "../../lib/listingInsights";
 import { ListingCard, SoldTag } from "./ListingCard";
 import { CopyIcon, ExternalIcon, TrashIcon, TrophyIcon } from "./icons";
@@ -31,6 +34,7 @@ import {
   formatNumber,
   ghostButtonClass,
   panelClass,
+  secondaryButtonClass,
   timeAgo,
   useToast,
 } from "./ui";
@@ -41,7 +45,7 @@ type Props = {
   /** Normalized links of currently ranked ads - those live on the Rank tab instead. */
   rankedLinks: Set<string>;
   /** Opens the "which list, which position?" dialog. */
-  onRank: (group: ListingGroup) => void;
+  onRank: (car: RankCandidate) => void;
   /** Latest link-check result per normLink key. */
   linkChecks: Map<string, LinkCheckRow>;
   /** Cars pushed out of a full rank list - shown in their own section on top. */
@@ -75,26 +79,24 @@ function carLine(title: string, price: number | null, km: number | null, sold: b
   return `${title}${facts ? ` — ${facts}` : ""}${sold ? " (SOLD)" : ""}`;
 }
 
-/** Same WhatsApp format as the Rank tab's Copy: *bold* headings, numbered cars, link under each. */
-function favoritesAsText(dropouts: DropoutItem[], groups: ListingGroup[], linkChecks: Map<string, LinkCheckRow>): string {
-  const lines: string[] = [];
-  if (dropouts.length) {
-    lines.push("*Dropped from ranking*");
-    dropouts.forEach(({ row, group }, i) => {
-      const l = group?.primary;
-      const title = row.title ?? (l ? [l.year, l.make, l.model].filter(Boolean).join(" ") : "Car");
-      const sold = !!(row.link && linkChecks.get(normLink(row.link))?.status === "gone");
-      lines.push(`${i + 1}. ${carLine(title, l?.price ?? row.price, l?.km ?? row.km, sold)}`);
-      lines.push(row.link ?? "(no link)");
-    });
-    lines.push("");
-  }
-  lines.push("*Favorites*");
+/** Same WhatsApp format as the Rank tab's Copy: *bold* heading, numbered cars, link under each. */
+function dropoutsAsText(dropouts: DropoutItem[], linkChecks: Map<string, LinkCheckRow>): string {
+  const lines = ["*Dropped from ranking*"];
+  dropouts.forEach(({ row, group }, i) => {
+    const c = candidateFromDropout(row, group);
+    const sold = !!(row.link && linkChecks.get(normLink(row.link))?.status === "gone");
+    lines.push(`${i + 1}. ${carLine(c.title, c.price, c.km, sold)}`);
+    lines.push(row.link ?? "(no link)");
+  });
+  return lines.join("\n");
+}
+
+function favoritesAsText(groups: ListingGroup[], linkChecks: Map<string, LinkCheckRow>): string {
+  const lines = ["*Favorites*"];
   groups.forEach((g, i) => {
-    const l = g.primary;
-    const title = [l.year, l.make, l.model].filter(Boolean).join(" ");
-    lines.push(`${i + 1}. ${carLine(title, l.price, l.km, !!soldCheck(g, linkChecks))}`);
-    lines.push(l.link);
+    const c = candidateFromGroup(g);
+    lines.push(`${i + 1}. ${carLine(c.title, c.price, c.km, !!soldCheck(g, linkChecks))}`);
+    lines.push(g.primary.link);
   });
   return lines.join("\n");
 }
@@ -207,9 +209,14 @@ export function FavoritesTab({
     }
   }
 
-  async function handleCopy() {
-    const ok = await copyText(favoritesAsText(dropoutItems, groups, linkChecks));
-    notify(ok ? "Favorites copied — paste it into WhatsApp" : "Couldn't copy — your browser blocked clipboard access", {
+  async function copy(what: "dropouts" | "favorites" | "all") {
+    const parts = [
+      what !== "favorites" && dropoutItems.length ? dropoutsAsText(dropoutItems, linkChecks) : null,
+      what !== "dropouts" && groups.length ? favoritesAsText(groups, linkChecks) : null,
+    ].filter(Boolean);
+    const label = what === "all" ? "Everything" : what === "dropouts" ? "Dropped cars" : "Favorites";
+    const ok = parts.length > 0 && (await copyText(parts.join("\n\n")));
+    notify(ok ? `${label} copied — paste it into WhatsApp` : "Couldn't copy — your browser blocked clipboard access", {
       tone: ok ? "info" : "error",
     });
   }
@@ -228,7 +235,7 @@ export function FavoritesTab({
         {!sold && (
           <button
             className={`${ghostButtonClass} hover:!text-orange-600`}
-            onClick={() => onRank(group)}
+            onClick={() => onRank(dropout ? candidateFromDropout(dropout, group) : candidateFromGroup(group))}
             title="Rank it - choose the list and position (30 days)"
           >
             <TrophyIcon /> {dropout ? "Rank again" : "Rank"}
@@ -257,14 +264,26 @@ export function FavoritesTab({
 
   return (
     <div className="space-y-8">
+      {dropoutItems.length > 0 && groups.length > 0 && (
+        <div className="-mb-4 flex justify-end">
+          <button className={secondaryButtonClass} onClick={() => copy("all")} title="Dropped cars and favorites in one message">
+            <CopyIcon /> Copy all
+          </button>
+        </div>
+      )}
       {dropoutItems.length > 0 && (
         <section>
-          <div className="mb-3">
-            <h2 className="flex items-baseline gap-2 text-lg font-bold tracking-tight">
-              Dropped from ranking
-              <span className="text-sm font-medium tabular-nums text-neutral-400">{dropoutItems.length}</span>
-            </h2>
-            <p className="text-sm text-neutral-500">Pushed out of a full rank list. Rank again, or remove.</p>
+          <div className="mb-3 flex items-start justify-between gap-3">
+            <div>
+              <h2 className="flex items-baseline gap-2 text-lg font-bold tracking-tight">
+                Dropped from ranking
+                <span className="text-sm font-medium tabular-nums text-neutral-400">{dropoutItems.length}</span>
+              </h2>
+              <p className="text-sm text-neutral-500">Pushed out of a full rank list. Rank again, or remove.</p>
+            </div>
+            <button className={`${ghostButtonClass} shrink-0`} onClick={() => copy("dropouts")}>
+              <CopyIcon /> Copy
+            </button>
           </div>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {dropoutItems.map(({ row, group }) => {
@@ -287,6 +306,7 @@ export function FavoritesTab({
                   note={note}
                   sold={row.link ? linkChecks.get(normLink(row.link)) : undefined}
                   onRemove={() => handleRemove(undefined, row)}
+                  onRankAgain={() => onRank(candidateFromDropout(row, undefined))}
                 />
               );
             })}
@@ -318,9 +338,11 @@ export function FavoritesTab({
               )}
             </p>
           </div>
-          <button className={`${ghostButtonClass} shrink-0`} onClick={handleCopy}>
-            <CopyIcon /> Copy list
-          </button>
+          {groups.length > 0 && (
+            <button className={`${ghostButtonClass} shrink-0`} onClick={() => copy("favorites")}>
+              <CopyIcon /> Copy
+            </button>
+          )}
         </div>
         {groups.length === 0 ? (
           <p className="text-sm text-neutral-500">No other favorites.</p>
@@ -350,11 +372,13 @@ function UntrackedDropout({
   note,
   sold,
   onRemove,
+  onRankAgain,
 }: {
   row: RankDropoutRow;
   note: string;
   sold: LinkCheckRow | undefined;
   onRemove: () => void;
+  onRankAgain: () => void;
 }) {
   const gone = sold?.status === "gone" ? sold : undefined;
   return (
@@ -373,12 +397,17 @@ function UntrackedDropout({
         </p>
         <p className="text-xs font-medium text-orange-700 dark:text-orange-400">{note}</p>
         {row.note && <p className="text-sm text-neutral-500">{row.note}</p>}
-        <p className="text-xs text-neutral-400">Not tracked by MotoHunt, so it can&apos;t be ranked from here.</p>
+        <p className="text-xs text-neutral-400">Not scraped by MotoHunt — shown from the details saved with its rank.</p>
       </div>
       <div className="flex items-center gap-1 border-t border-neutral-100 px-2 py-1.5 dark:border-neutral-800">
         <button className={`${ghostButtonClass} hover:!text-red-600`} onClick={onRemove}>
           <TrashIcon /> Remove
         </button>
+        {!gone && (
+          <button className={`${ghostButtonClass} hover:!text-orange-600`} onClick={onRankAgain}>
+            <TrophyIcon /> Rank again
+          </button>
+        )}
         {row.link && (
           <a href={row.link} target="_blank" rel="noreferrer" className={`${ghostButtonClass} ml-auto text-neutral-900 dark:text-neutral-100`}>
             View ad <ExternalIcon />

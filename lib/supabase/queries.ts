@@ -248,7 +248,7 @@ export async function fetchRankings(): Promise<RankingRow[]> {
 
 /** Starts a fresh 30-day window (expires_at defaults server-side). Returns the new row. */
 export async function addRanking(
-  input: Pick<RankingRow, "list" | "link" | "rank" | "title" | "price" | "km">
+  input: Pick<RankingRow, "list" | "link" | "rank" | "title" | "price" | "km"> & { note?: string | null }
 ): Promise<RankingRow> {
   const supabase = getSupabaseClient();
   const { data, error } = await supabase.from("rankings").insert(input).select().single();
