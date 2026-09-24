@@ -284,3 +284,74 @@ export function candidateFromDropout(row: RankDropoutRow, g: ListingGroup | unde
     links: [...(row.link ? [row.link] : []), ...(g ? [g.primary, ...g.others].map((x) => x.link) : [])],
   };
 }
+
+// ---- Rank insertion rules ------------------------------------------------------------
+
+/** At most this many cars of one model (make+model) per rank list. */
+export const MODEL_LIMIT = 4;
+
+/**
+ * Model key ("nissan|xtrail") for anything ranked. Scraped ads use their own
+ * make/model. Otherwise it's read from the title: the first known make+model
+ * (from live listings) that appears in it - so "2020 NISSAN X TRAIL S" and
+ * "2022 Nissan X-Trail SE" agree - falling back to the first two words after
+ * the year.
+ */
+export function makeModelKeyOf(market: ListingRow[]): (car: { link: string | null; title: string | null }) => string {
+  const byLink = groupsByLink(market);
+  const known = [...new Set(market.map((l) => carKey(l)))]
+    .map((key) => ({ key, squashed: key.replace("|", "") }))
+    .sort((a, b) => b.squashed.length - a.squashed.length); // "landcruiserprado" before "landcruiser"
+  return ({ link, title }) => {
+    const g = link ? byLink.get(normLink(link)) : undefined;
+    if (g) return carKey(g.primary);
+    const text = norm(title ?? "");
+    const hit = known.find((k) => text.includes(k.squashed));
+    if (hit) return hit.key;
+    const words = (title ?? "").replace(/^\s*(19|20)\d{2}\s+/, "").split(/\s+/);
+    return `${norm(words[0] ?? "")}|${norm(words[1] ?? "")}`;
+  };
+}
+
+type Rankable = { id: string; link: string | null; title: string | null };
+
+export type RankInsertPlan<T extends Rankable> =
+  | { ok: true; kept: T[]; dropped: { row: T; reason: "model" | "list" }[] }
+  | { ok: false; reason: string; maxPosition: number };
+
+/**
+ * Where everything lands when `newRow` is inserted at `position` (1-based):
+ *  1. Model cap: if that makes more than MODEL_LIMIT of the new car's model,
+ *     the lowest-ranked one(s) of that model drop out - not the list's last car.
+ *     If the new car itself would be below the cut, the insert is refused and
+ *     `maxPosition` says how high it must go.
+ *  2. List cap: anything still past `listLimit` drops from the bottom.
+ */
+export function planRankInsert<T extends Rankable>(
+  inList: T[],
+  newRow: T,
+  position: number,
+  listLimit: number,
+  modelKey: (car: { link: string | null; title: string | null }) => string
+): RankInsertPlan<T> {
+  const key = modelKey(newRow);
+  const ordered = [...inList];
+  ordered.splice(position - 1, 0, newRow);
+
+  const sameModel = ordered.filter((r) => modelKey(r) === key);
+  const overModel = sameModel.slice(MODEL_LIMIT);
+  if (overModel.includes(newRow)) {
+    // The (MODEL_LIMIT)th existing car of this model is the one to beat.
+    const nth = inList.filter((r) => modelKey(r) === key)[MODEL_LIMIT - 1];
+    return {
+      ok: false,
+      reason: `It would be car #${MODEL_LIMIT + 1} of this model in the list (max ${MODEL_LIMIT}).`,
+      maxPosition: inList.indexOf(nth) + 1,
+    };
+  }
+
+  const dropped: { row: T; reason: "model" | "list" }[] = overModel.map((row) => ({ row, reason: "model" as const }));
+  const remaining = ordered.filter((r) => !overModel.includes(r));
+  for (const row of remaining.slice(listLimit)) dropped.push({ row, reason: "list" });
+  return { ok: true, kept: remaining.slice(0, listLimit), dropped };
+}

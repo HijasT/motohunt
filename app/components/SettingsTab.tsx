@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import type { BlockedModelRow, ListingRow, SavedSearchRow, ScrapeStatus } from "../../lib/supabase/types";
 import {
   clearListingStatus,
@@ -12,7 +12,7 @@ import { groupDuplicates, type ListingGroup } from "../../lib/listingInsights";
 import { FilterBar } from "./FilterBar";
 import { describeSearch } from "./SavedSearchPicker";
 import { ScrapeHealth } from "./ScrapeHealth";
-import { ExternalIcon, PencilIcon, TrashIcon, UndoIcon } from "./icons";
+import { ChevronIcon, ExternalIcon, PencilIcon, TrashIcon, UndoIcon, XIcon } from "./icons";
 import {
   ErrorNote,
   errorMessage,
@@ -21,6 +21,7 @@ import {
   inputClass,
   panelClass,
   secondaryButtonClass,
+  usePersistentState,
   useToast,
 } from "./ui";
 
@@ -209,33 +210,7 @@ export function SettingsTab({
       </Section>
 
       <div className="lg:col-span-2">
-        <Section
-          title="Blocked models"
-          hint="Never shown in search results, from any saved search. Favorites and ranked cars aren't affected."
-        >
-          <BlockForm onBlock={onBlock} />
-          {blocked.length === 0 ? (
-            <p className={emptyRowClass}>
-              Nothing blocked. Use the ⊘ button on a result to block its model, or add one above.
-            </p>
-          ) : (
-            <ul className={listClass}>
-              {blocked.map((b) => (
-                <li key={b.id} className={rowClass}>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate font-medium">
-                      {b.make} {b.model ?? <span className="font-normal text-neutral-500">(all models)</span>}
-                    </p>
-                    <p className="text-sm text-neutral-500">Blocked {new Date(b.created_at).toLocaleDateString()}</p>
-                  </div>
-                  <button className={ghostButtonClass} onClick={() => onUnblock(b)}>
-                    <UndoIcon /> Unblock
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Section>
+        <BlockedModels blocked={blocked} onBlock={onBlock} onUnblock={onUnblock} />
       </div>
 
       <div className="lg:col-span-2">
@@ -312,5 +287,109 @@ function BlockForm({ onBlock }: { onBlock: (make: string, model: string | null) 
         Block
       </button>
     </form>
+  );
+}
+
+/** Case/spacing-insensitive make key, so "Renault" and "RENAULT" land in one group. */
+const makeKey = (make: string) => make.trim().toLowerCase();
+
+/**
+ * Blocked models, grouped by make (A-Z) with models A-Z inside - a whole-make
+ * block ("All models") first. Collapsible, collapsed by default; remembered.
+ */
+function BlockedModels({
+  blocked,
+  onBlock,
+  onUnblock,
+}: {
+  blocked: BlockedModelRow[];
+  onBlock: (make: string, model: string | null) => Promise<void>;
+  onUnblock: (row: BlockedModelRow) => Promise<void>;
+}) {
+  const [open, setOpen] = usePersistentState("motohunt.blockedOpen", false);
+
+  const byMake = useMemo(() => {
+    const groups = new Map<string, { make: string; rows: BlockedModelRow[] }>();
+    for (const b of blocked) {
+      const key = makeKey(b.make);
+      const g = groups.get(key) ?? { make: b.make.trim(), rows: [] };
+      // Prefer "Kia" over "KIA" for the heading when both spellings were blocked.
+      const isShouting = (m: string) => m === m.toUpperCase() && m !== m.toLowerCase();
+      if (isShouting(g.make) && !isShouting(b.make.trim())) g.make = b.make.trim();
+      g.rows.push(b);
+      groups.set(key, g);
+    }
+    return [...groups.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([, g]) => ({
+        ...g,
+        rows: g.rows.sort((a, b) =>
+          a.model == null ? -1 : b.model == null ? 1 : a.model.localeCompare(b.model, undefined, { sensitivity: "base" })
+        ),
+      }));
+  }, [blocked]);
+
+  return (
+    <section className={`${panelClass} overflow-hidden`}>
+      <button
+        onClick={() => setOpen(!open)}
+        aria-expanded={open}
+        className="flex w-full items-start gap-3 px-4 py-3 text-left hover:bg-neutral-50 dark:hover:bg-neutral-800/40"
+      >
+        <ChevronIcon className={`mt-1 h-4 w-4 shrink-0 text-neutral-400 transition-transform ${open ? "rotate-90" : ""}`} />
+        <div className="min-w-0 flex-1">
+          <h2 className="flex items-baseline gap-2 font-semibold">
+            Blocked models
+            <span className="text-sm font-medium tabular-nums text-neutral-400">
+              {blocked.length}
+              {byMake.length > 0 && ` · ${byMake.length} make${byMake.length === 1 ? "" : "s"}`}
+            </span>
+          </h2>
+          <p className="text-sm text-neutral-500">
+            Never shown in search results, from any saved search. Favorites and ranked cars aren&apos;t affected.
+          </p>
+        </div>
+      </button>
+
+      {open && (
+        <div className="border-t border-neutral-100 dark:border-neutral-800">
+          <BlockForm onBlock={onBlock} />
+          {byMake.length === 0 ? (
+            <p className={emptyRowClass}>
+              Nothing blocked. Use the ⊘ button on a result to block its model, or add one above.
+            </p>
+          ) : (
+            <div className={listClass}>
+              {byMake.map((g) => (
+                <div key={g.make} className="px-4 py-3">
+                  <h3 className="mb-1 text-xs font-semibold uppercase tracking-wider text-neutral-500">
+                    {g.make} <span className="font-medium text-neutral-400">{g.rows.length}</span>
+                  </h3>
+                  <ul className="flex flex-wrap gap-2">
+                    {g.rows.map((b) => (
+                      <li
+                        key={b.id}
+                        className="inline-flex items-center gap-1 rounded-full border border-neutral-200 bg-neutral-50 py-0.5 pl-3 pr-1 text-sm dark:border-neutral-700 dark:bg-neutral-800/60"
+                        title={`Blocked ${new Date(b.created_at).toLocaleDateString()}`}
+                      >
+                        {b.model ?? <span className="italic text-neutral-500">All models</span>}
+                        <button
+                          className="rounded-full p-1 text-neutral-400 hover:bg-neutral-200 hover:text-neutral-900 dark:hover:bg-neutral-700 dark:hover:text-neutral-100"
+                          onClick={() => onUnblock(b)}
+                          aria-label={`Unblock ${g.make} ${b.model ?? "(all models)"}`}
+                          title="Unblock - show in results again"
+                        >
+                          <XIcon className="h-3.5 w-3.5" />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </section>
   );
 }

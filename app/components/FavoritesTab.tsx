@@ -24,7 +24,7 @@ import {
   type RankCandidate,
 } from "../../lib/listingInsights";
 import { ListingCard, SoldTag } from "./ListingCard";
-import { CopyIcon, ExternalIcon, TrashIcon, TrophyIcon } from "./icons";
+import { CopyIcon, ExternalIcon, PlusIcon, TrashIcon, TrophyIcon } from "./icons";
 import {
   CardGridSkeleton,
   EmptyState,
@@ -53,6 +53,8 @@ type Props = {
   onDropoutsChanged: () => Promise<void>;
   /** Every live scraped listing - drop-outs are matched against these, not just favorites. */
   market: ListingRow[];
+  /** Opens the "add a car by hand" dialog. */
+  onAddCar: () => void;
 };
 
 /** A car counts as sold when the link check found every copy of it gone. */
@@ -110,6 +112,7 @@ export function FavoritesTab({
   dropouts,
   onDropoutsChanged,
   market,
+  onAddCar,
 }: Props) {
   const { notify } = useToast();
   const [listings, setListings] = useState<ListingRow[] | null>(null);
@@ -258,6 +261,11 @@ export function FavoritesTab({
             Results to shortlist it here.
           </>
         )}
+        <div className="mt-3">
+          <button className={secondaryButtonClass} onClick={onAddCar}>
+            <PlusIcon /> Add a car by link
+          </button>
+        </div>
       </EmptyState>
     );
   }
@@ -338,11 +346,16 @@ export function FavoritesTab({
               )}
             </p>
           </div>
-          {groups.length > 0 && (
-            <button className={`${ghostButtonClass} shrink-0`} onClick={() => copy("favorites")}>
-              <CopyIcon /> Copy
+          <div className="flex shrink-0 items-center gap-1">
+            <button className={ghostButtonClass} onClick={onAddCar} title="Add an ad your searches didn't pick up">
+              <PlusIcon /> Add car
             </button>
-          )}
+            {groups.length > 0 && (
+              <button className={ghostButtonClass} onClick={() => copy("favorites")}>
+                <CopyIcon /> Copy
+              </button>
+            )}
+          </div>
         </div>
         {groups.length === 0 ? (
           <p className="text-sm text-neutral-500">No other favorites.</p>

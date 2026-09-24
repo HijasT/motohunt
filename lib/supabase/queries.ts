@@ -386,3 +386,57 @@ export async function restoreDropouts(rows: RankDropoutRow[]): Promise<void> {
   const { error } = await supabase.from("rank_dropouts").upsert(rows);
   if (error) throw error;
 }
+
+// ---- Manual favorites ---------------------------------------------------------------
+
+export type ManualCarInput = {
+  source: string;
+  link: string;
+  make: string;
+  model: string;
+  year: number | null;
+  price: number | null;
+  km: number | null;
+  description: string | null;
+  countryOfMake: string | null;
+};
+
+/** Same key the scraper uses (lib/supabase/uniqueKey.ts): sha256(source + "|" + link), hex. */
+async function uniqueKeyFor(source: string, link: string): Promise<string> {
+  const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${source}|${link}`));
+  return [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** Manual cars aren't re-seen by the scraper, so they get a long window instead of 14 days. */
+const MANUAL_EXPIRY_DAYS = 365;
+
+/**
+ * Adds a car typed in by hand as a normal listing, then favorites it - so rank,
+ * link checks, deal score and copy all work on it like on a scraped car.
+ * Returns the listing's unique_key.
+ */
+export async function addManualFavorite(car: ManualCarInput): Promise<string> {
+  const supabase = getSupabaseClient();
+  const unique_key = await uniqueKeyFor(car.source, car.link);
+  const { error } = await supabase.from("listings").upsert(
+    {
+      unique_key,
+      source: car.source,
+      make: car.make,
+      model: car.model,
+      year: car.year,
+      price: car.price,
+      original_price: car.price,
+      km: car.km,
+      description: car.description,
+      link: car.link,
+      country_of_make: car.countryOfMake,
+      last_seen_at: new Date().toISOString(),
+      expires_at: new Date(Date.now() + MANUAL_EXPIRY_DAYS * 86_400_000).toISOString(),
+    },
+    { onConflict: "unique_key" }
+  );
+  if (error) throw error;
+  await setListingStatus([unique_key], "favorited");
+  return unique_key;
+}

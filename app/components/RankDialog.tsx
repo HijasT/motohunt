@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type { RankingRow } from "../../lib/supabase/types";
-import type { RankCandidate } from "../../lib/listingInsights";
+import { MODEL_LIMIT, planRankInsert, type RankCandidate } from "../../lib/listingInsights";
 import { GENERAL_LIST, LIST_ORDER, listLimit } from "./RankTab";
 import { XIcon } from "./icons";
 import { formatNumber, ghostButtonClass, inputClass, panelClass, primaryButtonClass } from "./ui";
@@ -11,6 +11,8 @@ const NEW_LIST = "__new__";
 
 type Props = {
   car: RankCandidate;
+  /** Make+model key for any ranked car - drives the max-4-per-model rule. */
+  modelKey: (car: { link: string | null; title: string | null }) => string;
   /** Current (unexpired) ranks across all lists, sorted by rank. */
   rankings: RankingRow[];
   onCancel: () => void;
@@ -21,7 +23,7 @@ type Props = {
 const labelClass = "block text-xs font-medium text-neutral-600 dark:text-neutral-400";
 
 /** Asks where a favorite goes: which list, and which position in it. */
-export function RankDialog({ car, rankings, onCancel, onConfirm }: Props) {
+export function RankDialog({ car, modelKey, rankings, onCancel, onConfirm }: Props) {
   const carTitle = car.title;
 
   // The chat's lists first (even if currently empty), then any others that exist.
@@ -63,11 +65,18 @@ export function RankDialog({ car, rankings, onCancel, onConfirm }: Props) {
     }
   }
 
-  // Preview: the list as it will look, with the new car in its slot - and, if the
-  // list is full, the car(s) pushed past the limit shown as dropping out.
-  const preview = [...items.map((r) => ({ key: r.id, title: r.title ?? r.link ?? "?", isNew: false }))];
-  preview.splice(position - 1, 0, { key: "new", title: carTitle, isNew: true });
-  const dropping = preview.slice(limit);
+  // Same planner the save uses, so the preview can't disagree with the result:
+  // max 4 of one model (the lowest of that model drops), then the list cap.
+  const newRow = { id: "new", link: car.link, title: carTitle };
+  const plan = planRankInsert<{ id: string; link: string | null; title: string | null }>(
+    items,
+    newRow,
+    position,
+    limit,
+    modelKey
+  );
+  const kept = plan.ok ? plan.kept : [];
+  const dropping = plan.ok ? plan.dropped : [];
 
   return (
     <div
@@ -144,30 +153,55 @@ export function RankDialog({ car, rankings, onCancel, onConfirm }: Props) {
           )}
         </div>
 
+        {list && !plan.ok && (
+          <p className="mx-4 mb-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">
+            {plan.reason} Pick <span className="font-semibold">#{plan.maxPosition} or higher</span> to replace the lowest
+            one.
+          </p>
+        )}
         {list && dropping.length > 0 && (
           <p className="mx-4 mb-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
-            {list} holds {limit}. <span className="font-semibold">{dropping.map((d) => d.title).join(", ")}</span>{" "}
-            will drop out to Favorites → “Dropped from ranking”.
+            {dropping.map((d, i) => (
+              <span key={d.row.id}>
+                {i > 0 && " "}
+                <span className="font-semibold">{d.row.title ?? d.row.link}</span>{" "}
+                {d.reason === "model"
+                  ? `drops out — max ${MODEL_LIMIT} of the same model per list.`
+                  : `drops out — ${list} holds ${limit}.`}
+              </span>
+            ))}{" "}
+            Dropped cars go to Favorites → “Dropped from ranking”.
           </p>
         )}
 
-        {list && (
+        {list && plan.ok && (
           <ol className="mx-4 mb-3 min-h-0 flex-1 overflow-y-auto rounded-lg border border-neutral-100 text-sm dark:border-neutral-800">
-            {preview.map((p, i) => (
+            {kept.map((r, i) => (
               <li
-                key={p.key}
+                key={r.id}
                 className={`flex gap-2 px-3 py-1.5 ${
-                  p.isNew
+                  r === newRow
                     ? "bg-orange-50 font-semibold text-orange-800 dark:bg-orange-950/40 dark:text-orange-300"
-                    : i >= limit
-                      ? "bg-neutral-50 text-neutral-400 line-through dark:bg-neutral-800/40"
-                      : "text-neutral-600 dark:text-neutral-400"
-                } ${i === limit ? "border-t border-dashed border-neutral-300 dark:border-neutral-700" : ""}`}
+                    : "text-neutral-600 dark:text-neutral-400"
+                }`}
               >
-                <span className="w-6 shrink-0 text-right tabular-nums">{i < limit ? `${i + 1}.` : "—"}</span>
-                <span className="truncate">{p.title}</span>
-                {p.isNew && <span className="ml-auto shrink-0 text-xs font-medium">new</span>}
-                {i >= limit && <span className="ml-auto shrink-0 text-xs font-medium no-underline">drops out</span>}
+                <span className="w-6 shrink-0 text-right tabular-nums">{i + 1}.</span>
+                <span className="truncate">{r.title ?? r.link}</span>
+                {r === newRow && <span className="ml-auto shrink-0 text-xs font-medium">new</span>}
+              </li>
+            ))}
+            {dropping.map((d, i) => (
+              <li
+                key={d.row.id}
+                className={`flex gap-2 bg-neutral-50 px-3 py-1.5 text-neutral-400 dark:bg-neutral-800/40 ${
+                  i === 0 ? "border-t border-dashed border-neutral-300 dark:border-neutral-700" : ""
+                }`}
+              >
+                <span className="w-6 shrink-0 text-right">—</span>
+                <span className="truncate line-through">{d.row.title ?? d.row.link}</span>
+                <span className="ml-auto shrink-0 text-xs font-medium">
+                  {d.reason === "model" ? "drops (model limit)" : "drops out"}
+                </span>
               </li>
             ))}
           </ol>
@@ -177,7 +211,7 @@ export function RankDialog({ car, rankings, onCancel, onConfirm }: Props) {
           <button type="button" className={ghostButtonClass} onClick={onCancel} disabled={busy}>
             Cancel
           </button>
-          <button type="submit" className={primaryButtonClass} disabled={!list || busy}>
+          <button type="submit" className={primaryButtonClass} disabled={!list || busy || !plan.ok}>
             {busy ? "Ranking…" : `Rank #${position}${list ? ` in ${list}` : ""}`}
           </button>
         </div>

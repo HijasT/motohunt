@@ -127,3 +127,9 @@ export const RefreshIcon = (props: IconProps) => (
     <path d="M8 16H3v5" />
   </Icon>
 );
+
+export const ChevronIcon = (props: IconProps) => (
+  <Icon {...props}>
+    <path d="m9 18 6-6-6-6" />
+  </Icon>
+);

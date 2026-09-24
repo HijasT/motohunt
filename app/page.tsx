@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { FilterBar } from "./components/FilterBar";
 import { SavedSearchPicker } from "./components/SavedSearchPicker";
 import { ResultsTab } from "./components/ResultsTab";
@@ -8,6 +8,7 @@ import { FavoritesTab } from "./components/FavoritesTab";
 import { SettingsTab } from "./components/SettingsTab";
 import { RankTab, listLimit } from "./components/RankTab";
 import { RankDialog } from "./components/RankDialog";
+import { AddCarDialog } from "./components/AddCarDialog";
 import { ScrapeStatusPill } from "./components/ScrapeHealth";
 import { CarIcon, RefreshIcon } from "./components/icons";
 import { CardGridSkeleton, ErrorNote, ToastProvider, errorMessage, focusRing, usePersistentState, useToast } from "./components/ui";
@@ -20,9 +21,18 @@ import type {
   SavedSearchRow,
   ScrapeStatus,
 } from "../lib/supabase/types";
-import { computeDeals, findBlock, groupsByLink, normLink, type RankCandidate } from "../lib/listingInsights";
+import {
+  computeDeals,
+  findBlock,
+  groupsByLink,
+  makeModelKeyOf,
+  normLink,
+  planRankInsert,
+  type RankCandidate,
+} from "../lib/listingInsights";
 import {
   addBlockedModel,
+  addManualFavorite,
   addRanking,
   deleteDropouts,
   fetchRankDropouts,
@@ -49,6 +59,7 @@ import {
   getScrapeStatus,
   markVisitedNow,
   updateSavedSearch,
+  type ManualCarInput,
   type SavedSearchInput,
   type SearchGroupWithMembers,
 } from "../lib/supabase/queries";
@@ -104,6 +115,7 @@ function App() {
   const [reloading, setReloading] = useState(false);
   /** Favorite being ranked - the dialog asks for its list and position. */
   const [rankTarget, setRankTarget] = useState<RankCandidate | null>(null);
+  const [addingCar, setAddingCar] = useState(false);
 
   async function refreshRankings() {
     try {
@@ -143,6 +155,36 @@ function App() {
     }
   }
 
+  /**
+   * Keep every tab current without pressing Refresh:
+   *  - switching tabs reloads the shared data (ranks, drop-outs, blocks, link
+   *    checks, saved searches). The tab being opened fetches its own list on
+   *    mount, so no remount is needed - just the shared state.
+   *  - coming back to the app after a while (phone unlocked, PWA reopened) does
+   *    a full reload, like pressing Refresh.
+   * Silent: failures keep the data already on screen.
+   */
+  const firstTabRender = useRef(true);
+  useEffect(() => {
+    if (firstTabRender.current) {
+      firstTabRender.current = false;
+      return;
+    }
+    if (loaded) void Promise.all([refresh().catch(() => {}), loadSideData()]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
+
+  useEffect(() => {
+    let hiddenAt = 0;
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") hiddenAt = Date.now();
+      else if (hiddenAt && Date.now() - hiddenAt > 60_000 && loaded) void reloadAll();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded]);
+
   async function refresh() {
     const [searches, gs] = await Promise.all([fetchSavedSearches(), fetchSearchGroups()]);
     setSavedSearches(searches);
@@ -172,6 +214,7 @@ function App() {
   }, []);
 
   const deals = useMemo(() => computeDeals(market), [market]);
+  const modelKey = useMemo(() => makeModelKeyOf(market), [market]);
   const linkChecks = useMemo(() => new Map(linkCheckRows.map((c) => [c.link_key, c])), [linkCheckRows]);
   const rankedLinks = useMemo(
     () => new Set(rankings.flatMap((r) => (r.link ? [normLink(r.link)] : []))),
@@ -211,6 +254,24 @@ function App() {
   }
 
   /**
+   * Adds a car by hand. If MotoHunt already scrapes that ad (any spelling of the
+   * link), it just favorites the existing listing instead of making a duplicate.
+   */
+  async function handleAddCar(car: ManualCarInput) {
+    const existing = groupsByLink(market).get(normLink(car.link));
+    if (existing) {
+      await setListingStatus(existing.keys, "favorited");
+      notify(`MotoHunt already tracks this ad - ${existing.primary.year ?? ""} ${existing.primary.make} ${existing.primary.model} added to Favorites`);
+    } else {
+      await addManualFavorite(car);
+      notify(`${[car.year, car.make, car.model].filter(Boolean).join(" ")} added to Favorites`);
+    }
+    setAddingCar(false);
+    await loadSideData(); // market now includes it (deal score, rank matching)
+    setReloadKey((k) => k + 1); // Favorites refetches
+  }
+
+  /**
    * Inserts the car at `position` in `list`; cars from that slot down move one
    * place lower. A list never grows past its limit (General 10, others 5): the
    * car(s) pushed past it drop out of the ranking and back into Favorites.
@@ -219,6 +280,13 @@ function App() {
   async function handleRank(car: RankCandidate, list: string, position: number) {
     const inList = rankings.filter((r) => r.list === list); // already sorted by rank
     const limit = listLimit(list);
+    // Plan first (the dialog already checked this; re-check against current data).
+    const placeholder = { id: "__new__", link: car.link, title: car.title };
+    const check = planRankInsert<{ id: string; link: string | null; title: string | null }>(inList, placeholder, position, limit, modelKey);
+    if (!check.ok) {
+      notify(`${check.reason} Pick #${check.maxPosition} or higher.`, { tone: "error" });
+      return;
+    }
     try {
       const row = await addRanking({
         list,
@@ -229,10 +297,11 @@ function App() {
         km: car.km,
         note: car.note,
       });
-      const ordered = [...inList];
-      ordered.splice(position - 1, 0, row);
-      const kept = ordered.slice(0, limit);
-      const dropped = ordered.slice(limit);
+      // Model cap (max 4 of one model: the lowest of that model drops) then list cap.
+      const plan = planRankInsert(inList, row, position, limit, modelKey);
+      if (!plan.ok) throw new Error(plan.reason); // unreachable: same data as the check above
+      const kept = plan.kept;
+      const dropped = plan.dropped.map((d) => d.row);
 
       // Dropped cars MotoHunt tracks become favorites (even ones ranked straight from
       // the chat); snapshot their current status first so undo can restore it.
@@ -249,7 +318,7 @@ function App() {
         dropped.map((d) => ({
           link: d.link,
           list,
-          rank: ordered.indexOf(d) + 1,
+          rank: inList.indexOf(d) + 1, // its position before this insert
           title: d.title,
           price: d.price,
           km: d.km,
@@ -263,8 +332,10 @@ function App() {
       await Promise.all([refreshRankings(), refreshDropouts()]);
       setReloadKey((k) => k + 1); // Favorites refetches: newly favorited drop-outs appear
       setRankTarget(null);
-      const droppedNote = dropped.length
-        ? ` · ${dropped.map((d) => d.title ?? "a car").join(", ")} dropped out → Favorites (Dropped from ranking)`
+      const droppedNote = plan.dropped.length
+        ? ` · ${plan.dropped
+            .map((d) => `${d.row.title ?? "a car"}${d.reason === "model" ? " (5th of its model)" : ""}`)
+            .join(", ")} dropped out → Favorites (Dropped from ranking)`
         : "";
       notify(`Ranked #${position} in ${list}${droppedNote}`, {
         onUndo: async () => {
@@ -439,6 +510,7 @@ function App() {
             dropouts={dropouts}
             onDropoutsChanged={refreshDropouts}
             market={market}
+            onAddCar={() => setAddingCar(true)}
           />
         ) : (
           <SettingsTab
@@ -456,9 +528,12 @@ function App() {
         )}
       </main>
 
+      {addingCar && <AddCarDialog onCancel={() => setAddingCar(false)} onSave={handleAddCar} />}
+
       {rankTarget && (
         <RankDialog
           car={rankTarget}
+          modelKey={modelKey}
           rankings={rankings}
           onCancel={() => setRankTarget(null)}
           onConfirm={(list, position) => handleRank(rankTarget, list, position)}

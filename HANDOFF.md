@@ -132,6 +132,22 @@ DESIGN.md flagged these directly or implied them; here's how each was resolved a
   (the chat) can exceed the cap; the Rank tab flags "17/10 over the limit" and
   the next in-app insert trims them. Caps are not enforced in SQL.
 
+- **Model cap** - at most 4 cars of one make+model per rank list
+  (`MODEL_LIMIT`, `planRankInsert` in lib/listingInsights.ts - the one planner
+  both the rank dialog preview and the save use). Adding a 5th drops the
+  lowest-ranked car *of that model*, not the list's last car; placing the new
+  car below all four is refused with "pick #N or higher". Model comes from the
+  scraped listing, else from the title matched against known make+model pairs
+  (`makeModelKeyOf`), so "NISSAN X TRAIL" = "Nissan X-Trail".
+- **Tabs stay fresh** - switching tabs reloads shared data (ranks, drop-outs,
+  blocks, link checks, saved searches); returning to the app after >1 min does a
+  full refresh; the Refresh button still reloads everything.
+- **Add car by hand** (Favorites → Add car) - paste an ad link; make/model/year
+  prefill from Dubizzle/CarSwitch/Cars24 URLs. Saved as a normal `listings` row
+  (unique_key = sha256(source|link), same as the scraper) with a 1-year expiry,
+  then favorited - so rank, link checks, deal score and copy all work. If
+  MotoHunt already has that ad (any URL spelling), it just favorites it.
+
 ## Why most results are Dubizzle (as of 2026-09-23)
 
 Last scrape: Dubizzle 134, CarSwitch 1, Cars24 1, Automall 0, YallaMotors 0.
