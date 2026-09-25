@@ -4,8 +4,8 @@ import type { ScrapeStatus } from "../../lib/supabase/types";
 import { AlertIcon } from "./icons";
 import { formatNumber, timeAgo } from "./ui";
 
-/** Cron is every 6h; GitHub often starts scheduled runs late, so allow some slack before warning. */
-const STALE_AFTER_MS = 9 * 60 * 60 * 1000;
+/** Cron is every 3h; GitHub often starts scheduled runs late, so allow some slack before warning. */
+const STALE_AFTER_MS = 5 * 60 * 60 * 1000;
 
 type Health = { tone: "ok" | "warn" | "error" | "unknown"; label: string; detail: string };
 

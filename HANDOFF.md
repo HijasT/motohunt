@@ -214,7 +214,7 @@ Full file-by-file breakdown is in `README.md`.
   `scrapers/carswitch.ts` maps the common ones.
 - This is a single-user, no-login app. Protecting the deployed frontend (Vercel
   password protection or similar) is on you — it isn't built into the app itself.
-- Personal price comparison only — keep the cron at 6h, don't hammer the sites.
+- Personal price comparison only — the cron is every 3h (changed from 6h on 2026-09-25); don't go more frequent than that, and keep saved searches running one at a time (see run.ts).
 - Kavak remains skipped (stricter anti-bot); Cars24 is now built (see above).
 - GitHub Actions runners need Node 22+ (`@supabase/supabase-js`'s realtime client
   requires native `WebSocket`, stable only from Node 22) - `package.json` pins

@@ -35,6 +35,8 @@ type Props = {
   blocked: BlockedModelRow[];
   onBlock: (make: string, model: string | null) => Promise<void>;
   onUnblock: (row: BlockedModelRow) => Promise<void>;
+  /** A hidden car was restored - it goes to Results' "Just restored" strip. */
+  onRestored: (group: ListingGroup) => void;
 };
 
 function Section({ title, hint, children }: { title: string; hint: string; children: ReactNode }) {
@@ -103,6 +105,7 @@ export function SettingsTab({
   blocked,
   onBlock,
   onUnblock,
+  onRestored,
 }: Props) {
   const { notify } = useToast();
   const [disliked, setDisliked] = useState<ListingRow[] | null>(null);
@@ -124,7 +127,8 @@ export function SettingsTab({
     setDisliked((prev) => prev?.filter((l) => !keys.has(l.unique_key)) ?? prev);
     try {
       await clearListingStatus(group.keys);
-      notify("Listing restored to Results");
+      // The page puts it in Results' "Just restored" strip and offers to jump there.
+      onRestored(group);
     } catch (e) {
       setDisliked((prev) => (prev ? [group.primary, ...group.others, ...prev] : prev));
       notify(`Couldn't restore: ${errorMessage(e)}`, { tone: "error" });
@@ -154,7 +158,7 @@ export function SettingsTab({
 
       {/* Widen to full width while editing so the form's range inputs have room. */}
       <div className={editingId ? "lg:col-span-2" : ""}>
-      <Section title="Saved searches" hint="Each one is scraped from every site on the 6-hourly run.">
+      <Section title="Saved searches" hint="Each one is scraped from every site on the 3-hourly run.">
         {savedSearches.length === 0 ? (
           <p className={emptyRowClass}>None yet.</p>
         ) : (

@@ -40,7 +40,7 @@ export type SearchRun = {
  * Chromium per filter set. Filter sets run one at a time, not concurrently with
  * each other - CarSwitch soft-blocks on a burst of requests (see DEV_NOTES.md),
  * and running N saved searches at once would multiply the request rate against
- * every site by N for no benefit within a 6-hour cron cadence.
+ * every site by N for no benefit within a 3-hour cron cadence.
  */
 export async function runScrapersForMany(
   searches: { label: string; filters: SearchFilters }[]

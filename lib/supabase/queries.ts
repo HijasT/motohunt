@@ -440,3 +440,12 @@ export async function addManualFavorite(car: ManualCarInput): Promise<string> {
   await setListingStatus([unique_key], "favorited");
   return unique_key;
 }
+
+/** Specific listings by key (any status, even expired) - e.g. the "Just restored" strip. */
+export async function fetchListingsByKeys(uniqueKeys: string[]): Promise<ListingRow[]> {
+  if (uniqueKeys.length === 0) return [];
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase.from("listings").select("*").in("unique_key", uniqueKeys);
+  if (error) throw error;
+  return data ?? [];
+}

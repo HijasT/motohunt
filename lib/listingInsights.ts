@@ -190,8 +190,8 @@ export function priceChange(l: ListingRow): PriceChange | null {
 
 // ---- Not seen lately -------------------------------------------------------------------
 
-/** Two missed 6-hourly runs (+ slack for GitHub's cron jitter) before calling a listing gone. */
-const GONE_AFTER_MS = 13 * 60 * 60 * 1000;
+/** Two missed 3-hourly runs (+ slack for GitHub's cron jitter) before calling a listing gone. */
+const GONE_AFTER_MS = 7 * 60 * 60 * 1000;
 
 /**
  * True when the scraper has run successfully well after this listing was last

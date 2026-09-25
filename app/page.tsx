@@ -28,6 +28,7 @@ import {
   makeModelKeyOf,
   normLink,
   planRankInsert,
+  type ListingGroup,
   type RankCandidate,
 } from "../lib/listingInsights";
 import {
@@ -116,6 +117,20 @@ function App() {
   /** Favorite being ranked - the dialog asks for its list and position. */
   const [rankTarget, setRankTarget] = useState<RankCandidate | null>(null);
   const [addingCar, setAddingCar] = useState(false);
+  /** Cars restored from Hidden this session - pinned in Results' "Just restored" strip. */
+  const [restoredKeys, setRestoredKeys] = useState<string[]>([]);
+
+  function handleRestored(group: ListingGroup) {
+    setRestoredKeys((prev) => [...group.keys, ...prev.filter((k) => !group.keys.includes(k))]);
+    const l = group.primary;
+    notify(`${[l.year, l.make, l.model].filter(Boolean).join(" ")} restored`, {
+      action: { label: "View in Results", onClick: () => setTab("results") },
+    });
+  }
+
+  function clearRestored(keys?: string[]) {
+    setRestoredKeys((prev) => (keys ? prev.filter((k) => !keys.includes(k)) : []));
+  }
 
   async function refreshRankings() {
     try {
@@ -478,6 +493,8 @@ function App() {
             />
             <ResultsTab
               reloadKey={reloadKey}
+              restoredKeys={restoredKeys}
+              onClearRestored={clearRestored}
               selectedSearches={selectedSearches}
               lastVisit={lastVisit}
               onClearSelection={() => setSelected([])}
@@ -524,6 +541,7 @@ function App() {
             blocked={blocked}
             onBlock={handleBlock}
             onUnblock={handleUnblock}
+            onRestored={handleRestored}
           />
         )}
       </main>

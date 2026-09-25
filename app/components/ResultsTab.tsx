@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { BlockedModelRow, ListingRow, SavedSearchRow, ScrapeStatus } from "../../lib/supabase/types";
-import { clearListingStatus, fetchResults, setListingStatus } from "../../lib/supabase/queries";
+import { clearListingStatus, fetchListingsByKeys, fetchResults, setListingStatus } from "../../lib/supabase/queries";
 import { groupDuplicates, isBlocked, isGroupGone, isGroupRanked, priceChange, type Deal, type ListingGroup } from "../../lib/listingInsights";
 import { ListingCard } from "./ListingCard";
 import { BanIcon, EyeOffIcon, HeartIcon, SearchIcon } from "./icons";
@@ -35,6 +35,9 @@ type Props = {
   onBlock: (make: string, model: string) => void;
   /** Changes when the user hits Refresh - refetch without resetting filters. */
   reloadKey: number;
+  /** Cars just restored from Hidden - shown in their own strip whatever the filters/blocks. */
+  restoredKeys: string[];
+  onClearRestored: (keys?: string[]) => void;
 };
 
 function matchesQuery(g: ListingGroup, q: string): boolean {
@@ -94,6 +97,8 @@ export function ResultsTab({
   blocked,
   onBlock,
   reloadKey,
+  restoredKeys,
+  onClearRestored,
 }: Props) {
   const { notify } = useToast();
   const [listings, setListings] = useState<ListingRow[] | null>(null);
@@ -121,9 +126,34 @@ export function ResultsTab({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectionKey, reloadKey]);
 
+  const [restored, setRestored] = useState<ListingRow[]>([]);
+  const restoredKeyList = restoredKeys.join(",");
+  useEffect(() => {
+    let cancelled = false;
+    fetchListingsByKeys(restoredKeys)
+      .then((rows) => !cancelled && setRestored(rows))
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [restoredKeyList, reloadKey]);
+  const restoredSet = useMemo(() => new Set(restoredKeys), [restoredKeys]);
+  const restoredGroups = useMemo(
+    () =>
+      groupDuplicates(restored.filter((l) => restoredSet.has(l.unique_key))).filter(
+        (g) => !isGroupRanked(g, rankedLinks)
+      ),
+    [restored, restoredSet, rankedLinks]
+  );
+
+  // Restored cars live in the strip above, not the main grid.
   const unranked = useMemo(
-    () => groupDuplicates(listings ?? []).filter((g) => !isGroupRanked(g, rankedLinks)),
-    [listings, rankedLinks]
+    () =>
+      groupDuplicates(listings ?? []).filter(
+        (g) => !isGroupRanked(g, rankedLinks) && !g.keys.some((k) => restoredSet.has(k))
+      ),
+    [listings, rankedLinks, restoredSet]
   );
   const groups = useMemo(() => unranked.filter((g) => !isBlocked(g.primary, blocked)), [unranked, blocked]);
   const blockedCount = unranked.length - groups.length;
@@ -187,6 +217,7 @@ export function ResultsTab({
     setListings((prev) => prev?.filter((l) => !keys.has(l.unique_key)) ?? prev);
     try {
       await setListingStatus(group.keys, status);
+      onClearRestored(group.keys); // dealt with - leaves the "Just restored" strip
       notify(status === "favorited" ? "Saved to favorites" : "Listing hidden", {
         onUndo: async () => {
           restore();
@@ -210,11 +241,83 @@ export function ResultsTab({
   };
   const flip = (t: Toggle) => setToggle(toggle === t ? null : t);
 
-  if (error) return <ErrorNote>{error}</ErrorNote>;
-  if (listings === null) return <CardGridSkeleton />;
+  function cardActions(group: ListingGroup) {
+    return (
+      <>
+        <button
+          className={`${ghostButtonClass} hover:!text-rose-600`}
+          onClick={() => triage(group, "favorited")}
+          title="Move to Favorites"
+        >
+          <HeartIcon /> Favorite
+        </button>
+        <button
+          className={ghostButtonClass}
+          onClick={() => triage(group, "disliked")}
+          title={group.others.length > 0 ? "Hide this car (all its listings)" : "Hide this listing (undo from Settings)"}
+        >
+          <EyeOffIcon /> Hide
+        </button>
+        <button
+          className={`${ghostButtonClass} px-2 hover:!text-red-600`}
+          onClick={() => onBlock(group.primary.make, group.primary.model)}
+          title={`Never show any ${group.primary.make} ${group.primary.model} in results (undo in Settings)`}
+          aria-label={`Block all ${group.primary.make} ${group.primary.model}`}
+        >
+          <BanIcon />
+        </button>
+      </>
+    );
+  }
+
+  /** Why a restored car wouldn't be in the normal grid - so it's no surprise when it's gone next time. */
+  const restoredNote = (g: ListingGroup): string => {
+    if (isBlocked(g.primary, blocked)) return "Restored · this model is blocked, so it only shows here";
+    if (new Date(g.primary.expires_at).getTime() <= Date.now()) return "Restored · this ad has expired from MotoHunt";
+    if (listings && !listings.some((l) => g.keys.includes(l.unique_key))) return "Restored · outside the selected saved searches";
+    return "Restored";
+  };
+
+  const strip =
+    restoredGroups.length > 0 ? (
+      <section className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-4 dark:border-emerald-900/60 dark:bg-emerald-950/20">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <h2 className="flex items-baseline gap-2 font-semibold">
+            Just restored
+            <span className="text-sm font-medium tabular-nums text-neutral-400">{restoredGroups.length}</span>
+          </h2>
+          <button className={ghostButtonClass} onClick={() => onClearRestored()} title="Move these back into the normal results">
+            Clear
+          </button>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {restoredGroups.map((group) => (
+            <ListingCard
+              key={group.primary.unique_key}
+              group={group}
+              isNew={false}
+              deal={dealOf(group)}
+              gone={isGroupGone(group, scrape)}
+              note={restoredNote(group)}
+              actions={cardActions(group)}
+            />
+          ))}
+        </div>
+      </section>
+    ) : null;
+
+  const withStrip = (node: React.ReactNode) => (
+    <div className="space-y-6">
+      {strip}
+      {node}
+    </div>
+  );
+
+  if (error) return withStrip(<ErrorNote>{error}</ErrorNote>);
+  if (listings === null) return withStrip(<CardGridSkeleton />);
 
   if (listings.length === 0) {
-    return (
+    return withStrip(
       <EmptyState title={selectedSearches.length > 0 ? "No listings match these searches" : "No listings yet"}>
         {selectedSearches.length > 0 ? (
           <>
@@ -224,7 +327,7 @@ export function ResultsTab({
             </button>
           </>
         ) : (
-          "The scraper runs every 6 hours — new matches for your saved searches will show up here."
+          "The scraper runs every 3 hours — new matches for your saved searches will show up here."
         )}
       </EmptyState>
     );
@@ -233,7 +336,7 @@ export function ResultsTab({
   const narrowed = query.trim() !== "" || source !== "all" || toggle !== null;
   const dupes = listings.length - groups.length;
 
-  return (
+  return withStrip(
     <div>
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center">
         <div className="relative flex-1">
@@ -331,32 +434,7 @@ export function ResultsTab({
               isNew={isNew(group)}
               deal={dealOf(group)}
               gone={isGroupGone(group, scrape)}
-              actions={
-                <>
-                  <button
-                    className={`${ghostButtonClass} hover:!text-rose-600`}
-                    onClick={() => triage(group, "favorited")}
-                    title="Move to Favorites"
-                  >
-                    <HeartIcon /> Favorite
-                  </button>
-                  <button
-                    className={ghostButtonClass}
-                    onClick={() => triage(group, "disliked")}
-                    title={group.others.length > 0 ? "Hide this car (all its listings)" : "Hide this listing (undo from Settings)"}
-                  >
-                    <EyeOffIcon /> Hide
-                  </button>
-                  <button
-                    className={`${ghostButtonClass} px-2 hover:!text-red-600`}
-                    onClick={() => onBlock(group.primary.make, group.primary.model)}
-                    title={`Never show any ${group.primary.make} ${group.primary.model} in results (undo in Settings)`}
-                    aria-label={`Block all ${group.primary.make} ${group.primary.model}`}
-                  >
-                    <BanIcon />
-                  </button>
-                </>
-              }
+              actions={cardActions(group)}
             />
           ))}
         </div>

@@ -2,7 +2,7 @@
 
 Tracks UAE used-car listings against saved searches you define in the app, and shows
 them in a Results / Favorites / Settings UI. A GitHub Actions cron scrapes the sites
-every 6 hours and writes into Supabase; the Next.js frontend reads straight from there.
+every 3 hours and writes into Supabase; the Next.js frontend reads straight from there.
 
 Originally a Google-Sheets version (v1); see `DESIGN.md` for the v2 architecture this
 now implements, and `HANDOFF.md` for the decisions made along the way.
@@ -81,7 +81,7 @@ variables → Actions):
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
 
-`.github/workflows/scrape.yml` then runs every 6 hours, or on demand from the Actions
+`.github/workflows/scrape.yml` then runs every 3 hours, or on demand from the Actions
 tab ("Run workflow").
 
 ## How it holds up over time

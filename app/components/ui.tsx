@@ -115,8 +115,12 @@ export function CardGridSkeleton({ count = 6 }: { count?: number }) {
 
 // ---- Toasts --------------------------------------------------------------------------
 
-type Toast = { id: number; message: string; tone: "info" | "error"; onUndo?: () => void };
-type ToastApi = { notify: (message: string, opts?: { onUndo?: () => void; tone?: Toast["tone"] }) => void };
+/** An optional extra button on a toast, e.g. "View in Results". */
+type ToastAction = { label: string; onClick: () => void };
+type Toast = { id: number; message: string; tone: "info" | "error"; onUndo?: () => void; action?: ToastAction };
+type ToastApi = {
+  notify: (message: string, opts?: { onUndo?: () => void; action?: ToastAction; tone?: Toast["tone"] }) => void;
+};
 
 const ToastContext = createContext<ToastApi>({ notify: () => {} });
 
@@ -134,7 +138,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     (message, opts) => {
       const id = ++nextId.current;
       // Keep at most 3 on screen; the newest is the one the user is looking for.
-      setToasts((prev) => [...prev.slice(-2), { id, message, tone: opts?.tone ?? "info", onUndo: opts?.onUndo }]);
+      setToasts((prev) => [
+        ...prev.slice(-2),
+        { id, message, tone: opts?.tone ?? "info", onUndo: opts?.onUndo, action: opts?.action },
+      ]);
       window.setTimeout(() => dismiss(id), TOAST_MS);
     },
     [dismiss]
@@ -158,6 +165,17 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             }`}
           >
             <span className="flex-1">{t.message}</span>
+            {t.action && (
+              <button
+                className="font-semibold text-orange-400 hover:text-orange-300 dark:text-orange-600 dark:hover:text-orange-700"
+                onClick={() => {
+                  t.action?.onClick();
+                  dismiss(t.id);
+                }}
+              >
+                {t.action.label}
+              </button>
+            )}
             {t.onUndo && (
               <button
                 className="inline-flex items-center gap-1 font-semibold text-orange-400 hover:text-orange-300 dark:text-orange-600 dark:hover:text-orange-700"
