@@ -151,12 +151,10 @@ DESIGN.md flagged these directly or implied them; here's how each was resolved a
 ## Why most results are Dubizzle (as of 2026-09-23)
 
 Last scrape: Dubizzle 134, CarSwitch 1, Cars24 1, Automall 0, YallaMotors 0.
-- **CarSwitch / Cars24** only filter make/model server-side; price/km/year are
-  applied locally to a small first slice (CarSwitch: 5 pages × ~24 in default
-  order; Cars24: first server batch of ~15-40, no "load more"). A budget search
-  with no make ("Under 20") sees the first ~120 cars of the whole site, almost
-  none in range. Fix = find their server-side price/year params (or sort by
-  price) and implement Cars24's load-more fetch.
+- **CarSwitch / Cars24 fixed 2026-09-27** (was 6 and 16 cars/run, now ~250 and
+  ~170 for the same searches): CarSwitch filters price/year/km server-side via
+  URL params; Cars24 pages price-sorted and stops past the budget. Details in
+  DEV_NOTES.md.
 - **Automall** is genuine: ~211 used cars, cheapest AED 27,995, median ~74k -
   nothing matches the current searches.
 - **YallaMotors** is blocked from datacenter IPs; it now *fails* the run for that

@@ -1,22 +1,30 @@
 import type { CarListing, SearchFilters } from "../lib/types.js";
-import { newContext, readJsonLd, hasType } from "../lib/browser.js";
+import { newContext, readJsonLd, hasType, sleep } from "../lib/browser.js";
 import { toCarListing, type SchemaVehicle } from "../lib/jsonld.js";
 import { matchesFilters, slugify } from "../lib/filters.js";
 
-// Verified against the live site - see DEV_NOTES.md.
+// Verified against the live site - see DEV_NOTES.md (re-verified 2026-09-27).
 //
 // CarSwitch server-renders an `ItemList` JSON-LD block of ~24 Product/Car entries
-// per page. Only `makes` and `models` are honoured as query params (plural - the
-// singular forms are silently ignored); price/km/year have no param we could find,
-// so those are applied by `matchesFilters` after the fact.
-//
-// An unrecognised make/model slug is ignored rather than rejected, and the site
-// returns its *unfiltered* list - which is exactly why every listing is re-checked
-// against the filters before it is returned.
+// per page (~2,300 cars in all). What the server actually filters on:
+//  - /uae/used-cars/search?minprice=&maxprice=&minyear=&maxyear=&minmileage=&maxmileage=
+//    - price/year/mileage ARE honoured server-side (lowercase names, from their JS).
+//  - makes=<make>&models=<model> on /search is honoured together (and combines
+//    with the ranges above) - but `makes` ALONE is ignored and returns every make.
+//  - so a make-only search uses the make's own page, /uae/used-cars/<make>?page=N,
+//    which filters by make but ignores the range params (applied locally instead).
+//  - a few models are "series" on their side and use `model_series=` instead of
+//    `models=` (list below, from their JS).
+// Every listing is still re-checked by `matchesFilters` - an unrecognised slug is
+// ignored rather than rejected and would otherwise leak the unfiltered list.
 
 const ORIGIN = "https://carswitch.com";
 const SEARCH = `${ORIGIN}/uae/used-cars/search`;
-const MAX_PAGES = 5;
+/** Server-filtered searches rarely need more; make-only pages (e.g. Nissan) run ~10. */
+const MAX_PAGES = 10;
+/** CarSwitch soft-blocks bursts (~15 hits in a couple of minutes) - space pages out. */
+const PAGE_DELAY_MS = 2500;
+const MODEL_SERIES = new Set(["5-series", "7-series", "land-cruiser", "patrol"]);
 
 /** CarSwitch's own slugs differ from the everyday brand name for a few makes. */
 const MAKE_SLUG_ALIASES: Record<string, string> = {
@@ -34,8 +42,26 @@ function makeSlug(make: string): string {
 
 function buildUrl(f: SearchFilters, pageNum: number): string {
   const params = new URLSearchParams();
-  if (f.make) params.set("makes", makeSlug(f.make));
-  if (f.model) params.set("models", slugify(f.model));
+
+  // Make without model: /search would ignore `makes`, so use the make's own page.
+  if (f.make && !f.model) {
+    if (pageNum > 1) params.set("page", String(pageNum));
+    const query = params.toString();
+    return `${ORIGIN}/uae/used-cars/${makeSlug(f.make)}${query ? `?${query}` : ""}`;
+  }
+
+  if (f.make && f.model) {
+    const model = slugify(f.model);
+    params.set("makes", makeSlug(f.make));
+    params.set(MODEL_SERIES.has(model) ? "model_series" : "models", model);
+  }
+  // Ranges are filtered by CarSwitch itself on /search.
+  if (f.minBudget !== undefined) params.set("minprice", String(f.minBudget));
+  if (f.maxBudget !== undefined) params.set("maxprice", String(f.maxBudget));
+  if (f.minYear !== undefined) params.set("minyear", String(f.minYear));
+  if (f.maxYear !== undefined) params.set("maxyear", String(f.maxYear));
+  if (f.minKm !== undefined) params.set("minmileage", String(f.minKm));
+  if (f.maxKm !== undefined) params.set("maxmileage", String(f.maxKm));
   if (pageNum > 1) params.set("page", String(pageNum));
 
   const query = params.toString();
@@ -62,12 +88,22 @@ export async function scrapeCarSwitch(filters: SearchFilters): Promise<CarListin
   const listings: CarListing[] = [];
 
   try {
+    const seen = new Set<string>();
     for (let pageNum = 1; pageNum <= MAX_PAGES; pageNum++) {
+      if (pageNum > 1) await sleep(PAGE_DELAY_MS);
       // The listing grid is server-rendered, so there is nothing to wait for.
       const cars = extractCars(await readJsonLd(page, buildUrl(filters, pageNum), 1500));
       if (cars.length === 0) break; // no ItemList past the last page of results
+      // Past the last page some sites repeat the final page instead of going empty.
+      const fresh = cars.filter((c) => {
+        const key = JSON.stringify((c as Record<string, unknown>).url ?? (c as Record<string, unknown>).name ?? c);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      if (fresh.length === 0) break;
 
-      for (const car of cars) {
+      for (const car of fresh) {
         const listing = toCarListing(car, "CarSwitch", ORIGIN, filters);
         if (listing && matchesFilters(listing, filters)) listings.push(listing);
       }

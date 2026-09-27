@@ -43,9 +43,15 @@ return the unfiltered list**, so server-side filtering alone is not trustworthy.
 - No bot protection, but it **soft-blocks on rapid requests** — roughly 15 hits in
   a couple of minutes started returning empty responses. Keep the page count low.
 - **URL**: `https://carswitch.com/uae/used-cars/search`
-- **Query params**: only `makes` and `models` (both **plural**; `make`/`model`
-  singular are accepted and ignored) plus `page`. No working param was found for
-  price, mileage or year — those are applied locally.
+- **Query params** (re-verified 2026-09-27, names from their JS bundle):
+  `minprice`/`maxprice`, `minyear`/`maxyear`, `minmileage`/`maxmileage` **are**
+  filtered server-side on `/search`, and combine with `makes`+`models` (plural).
+  But **`makes` alone is ignored** (returns every make, ~97 pages) — a make-only
+  search must use the make's page `/uae/used-cars/<make>?page=N`, which filters
+  by make but ignores the range params. Land Cruiser, Patrol, 5-Series and
+  7-Series use `model_series=` instead of `models=`. The search itself runs on
+  their server (Typesense behind it; no public search key) — no XHR to reuse.
+  Result: 6 → ~250 CarSwitch listings per run for the same saved searches.
 - **Make slugs are CarSwitch's own**, and an unknown slug returns the *unfiltered*
   list. Confirmed slugs come from their own nav links, e.g. `mercedes` (not
   `mercedes-benz`), `range-rover` (not `land-rover`). `MAKE_SLUG_ALIASES` in the
@@ -91,13 +97,16 @@ return the unfiltered list**, so server-side filtering alone is not trustworthy.
   UAE catalog — a Sharjah-listed car showed up in it during testing. A
   `-uae`-suffixed variant of these URLs also exists but isn't server-rendered
   with any data, so it's not used.
-- **No working price/km/year param was found** (query param and JSON-LD
-  approaches don't apply here — see below), so those are enforced locally by
-  `matchesFilters()`, same as CarSwitch.
-- **No pagination beyond the first server-rendered batch** (~15-40 cars per
-  URL). Loading more is a client-side "load more" fetch, not a `?page=` param;
-  capturing that endpoint wasn't attempted. Fine for a comparison tool, but a
-  real gap if you need Cars24's *entire* inventory for a make.
+- **No URL form for price/km/year** (only make/model and body/fuel SEO paths),
+  so those are enforced locally by `matchesFilters()`.
+- **Paging** (re-verified 2026-09-27): `?page=N` **is** server-rendered, 20 cars a
+  page (~1,600 total). `?sort=plh` sorts price low→high server-side and combines
+  with paging, so the scraper walks price-sorted pages and stops once a page
+  starts above the max budget (cap 15 pages). Sort codes from their JS: `plh`/`phl`
+  price, `olh`/`ohl` km, `alh`/`ahl` age, `lhl` recently added, `bestmatch`.
+  The page's own JS pages via `POST https://bff-uae.c24.tech/api/v1/listing-page`
+  (body: path, searchFilter, sort, size, page.searchAfter) — not needed since the
+  server-rendered pages work. Result: 16 → ~170 Cars24 listings per run.
 - **Data**: no schema.org JSON-LD at all. The listing cards are server-rendered,
   but the data travels in Next.js App Router's internal RSC "Flight" wire
   format — `self.__next_f.push([1, "<id>:<json>\n<id>:<json>..."])` script
