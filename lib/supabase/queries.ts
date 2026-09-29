@@ -58,13 +58,16 @@ export async function fetchResults(selectedSearches: SavedSearchRow[]): Promise<
   const clauses = selectedSearches.map(clauseForSearch).filter((c): c is string => c !== null);
   if (clauses.length > 0) query = query.or(clauses.join(","));
 
-  if (excludedKeys.length > 0) {
-    query = query.not("unique_key", "in", `(${excludedKeys.join(",")})`);
-  }
-
   const { data, error } = await query;
   if (error) throw error;
-  return data ?? [];
+
+  // Excluded client-side rather than as a `not(...in...)` filter: listing_status
+  // only grows (favorited/disliked are never pruned - see supabase/schema.sql),
+  // and a hand-built `in` list of hundreds of 64-char unique_keys blows past
+  // Supabase's URL/header size limit and comes back as a 400 Bad Request.
+  if (excludedKeys.length === 0) return data ?? [];
+  const excluded = new Set(excludedKeys);
+  return (data ?? []).filter((l) => !excluded.has(l.unique_key));
 }
 
 async function fetchStatusedKeys(): Promise<string[]> {
