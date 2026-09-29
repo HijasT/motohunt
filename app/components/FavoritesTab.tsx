@@ -153,10 +153,16 @@ export function FavoritesTab({
       if (fav) takenFavs.add(fav);
       items.push({ row, group: fav ?? (key ? marketByLink.get(key) : undefined) });
     }
-    // Sold ones first (stable sort keeps the rest in favorited order) - they need a decision.
+    // Sold ones first (they need a decision), then alphabetical by make/model.
     const rest = allGroups
       .filter((g) => !takenFavs.has(g))
-      .sort((a, b) => Number(!!soldCheck(b, linkChecks)) - Number(!!soldCheck(a, linkChecks)));
+      .sort((a, b) => {
+        const sold = Number(!!soldCheck(b, linkChecks)) - Number(!!soldCheck(a, linkChecks));
+        if (sold !== 0) return sold;
+        return (
+          a.primary.make.localeCompare(b.primary.make) || a.primary.model.localeCompare(b.primary.model)
+        );
+      });
     return { dropoutItems: items, groups: rest };
   }, [allGroups, dropouts, rankedLinks, linkChecks, marketByLink]);
 
