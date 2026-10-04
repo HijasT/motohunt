@@ -2,8 +2,9 @@
 
 import type { ReactNode } from "react";
 import type { LinkCheckRow, ListingRow } from "../../lib/supabase/types";
-import { priceChange, type Deal, type ListingGroup } from "../../lib/listingInsights";
+import { priceChange, specRegion, type Deal, type ListingGroup } from "../../lib/listingInsights";
 import { ExternalIcon } from "./icons";
+import { ScoreBadge } from "./Score";
 import { focusRing, formatNumber, ghostButtonClass, panelClass, timeAgo } from "./ui";
 
 type Props = {
@@ -133,8 +134,11 @@ export function ListingCard({ group, isNew, deal, gone, sold, note, actions }: P
           {deal && deal.label !== "fair" && <DealChip deal={deal} listing={listing} />}
           {listing.year !== null && <Spec>{listing.year}</Spec>}
           {listing.km !== null && <Spec>{formatNumber(listing.km)} km</Spec>}
+          {specRegion(listing) && <Spec>{specRegion(listing)} spec</Spec>}
           {listing.country_of_make && <Spec>{listing.country_of_make}</Spec>}
         </div>
+
+        <ScoreBadge listing={listing} />
 
         {listing.description && (
           <p className="line-clamp-2 text-sm text-neutral-500 dark:text-neutral-400">{listing.description}</p>

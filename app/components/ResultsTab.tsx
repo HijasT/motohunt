@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { BlockedModelRow, ListingRow, SavedSearchRow, ScrapeStatus } from "../../lib/supabase/types";
 import { clearListingStatus, fetchListingsByKeys, fetchResults, setListingStatus } from "../../lib/supabase/queries";
-import { groupDuplicates, isBlocked, isGroupGone, isGroupRanked, priceChange, type Deal, type ListingGroup } from "../../lib/listingInsights";
+import { groupDuplicates, isBlacklisted, isBlocked, isGroupGone, isGroupRanked, priceChange, type Deal, type ListingGroup } from "../../lib/listingInsights";
 import { ListingCard } from "./ListingCard";
 import { BanIcon, EyeOffIcon, HeartIcon, SearchIcon } from "./icons";
 import {
@@ -155,7 +155,11 @@ export function ResultsTab({
       ),
     [listings, rankedLinks, restoredSet]
   );
-  const groups = useMemo(() => unranked.filter((g) => !isBlocked(g.primary, blocked)), [unranked, blocked]);
+  // Blacklisted models (rules.txt) are auto-excluded alongside the user's own blocked models.
+  const groups = useMemo(
+    () => unranked.filter((g) => !isBlocked(g.primary, blocked) && !isBlacklisted(g.primary)),
+    [unranked, blocked]
+  );
   const blockedCount = unranked.length - groups.length;
 
   const isNew = (g: ListingGroup) => !!lastVisit && g.firstSeenAt > lastVisit;
