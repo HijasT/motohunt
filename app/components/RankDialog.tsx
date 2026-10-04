@@ -26,10 +26,13 @@ const labelClass = "block text-xs font-medium text-neutral-600 dark:text-neutral
 export function RankDialog({ car, modelKey, rankings, onCancel, onConfirm }: Props) {
   const carTitle = car.title;
 
-  // The chat's lists first (even if currently empty), then any others that exist.
+  // Only lists that actually hold cars - an empty list isn't a list. General is always
+  // offered (the default target for the first car); everything else appears once it has one.
   const lists = useMemo(() => {
-    const existing = [...new Set(rankings.map((r) => r.list))];
-    return [...LIST_ORDER, ...existing.filter((l) => !LIST_ORDER.includes(l)).sort()];
+    const existing = new Set(rankings.map((r) => r.list));
+    const known = LIST_ORDER.filter((l) => l === GENERAL_LIST || existing.has(l));
+    const extra = [...existing].filter((l) => !LIST_ORDER.includes(l)).sort();
+    return [...known, ...extra];
   }, [rankings]);
 
   const [choice, setChoice] = useState(GENERAL_LIST);

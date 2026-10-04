@@ -36,6 +36,7 @@ import {
   panelClass,
   secondaryButtonClass,
   timeAgo,
+  usePersistentState,
   useToast,
 } from "./ui";
 
@@ -117,6 +118,7 @@ export function FavoritesTab({
   const { notify } = useToast();
   const [listings, setListings] = useState<ListingRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [dropoutsOpen, setDropoutsOpen] = usePersistentState("motohunt.dropouts.open", false);
 
   useEffect(() => {
     let cancelled = false;
@@ -289,16 +291,25 @@ export function FavoritesTab({
         <section>
           <div className="mb-3 flex items-start justify-between gap-3">
             <div>
-              <h2 className="flex items-baseline gap-2 text-lg font-bold tracking-tight">
+              <button
+                className="flex items-baseline gap-2 text-lg font-bold tracking-tight"
+                onClick={() => setDropoutsOpen(!dropoutsOpen)}
+                aria-expanded={dropoutsOpen}
+                title={dropoutsOpen ? "Collapse" : "Expand"}
+              >
+                <span className="text-sm font-normal text-neutral-400">{dropoutsOpen ? "▾" : "▸"}</span>
                 Dropped from ranking
                 <span className="text-sm font-medium tabular-nums text-neutral-400">{dropoutItems.length}</span>
-              </h2>
-              <p className="text-sm text-neutral-500">Pushed out of a full rank list. Rank again, or remove.</p>
+              </button>
+              {dropoutsOpen && <p className="text-sm text-neutral-500">Pushed out of a full rank list. Rank again, or remove.</p>}
             </div>
-            <button className={`${ghostButtonClass} shrink-0`} onClick={() => copy("dropouts")}>
-              <CopyIcon /> Copy
-            </button>
+            {dropoutsOpen && (
+              <button className={`${ghostButtonClass} shrink-0`} onClick={() => copy("dropouts")}>
+                <CopyIcon /> Copy
+              </button>
+            )}
           </div>
+          {dropoutsOpen && (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {dropoutItems.map(({ row, group }) => {
               const note = `Dropped from ${row.list}${row.rank ? ` (#${row.rank})` : ""} · ${timeAgo(row.dropped_at)}`;
@@ -325,6 +336,7 @@ export function FavoritesTab({
               );
             })}
           </div>
+          )}
         </section>
       )}
 

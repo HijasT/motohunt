@@ -227,11 +227,84 @@ export function isBlocked(l: Pick<ListingRow, "make" | "model">, blocked: Blocke
   return blocked.some((b) => norm(b.make) === norm(l.make) && (b.model == null || norm(b.model) === norm(l.model)));
 }
 
+// ---- Model blacklist (auto-exclude, from rules.txt) ----------------------------------
+// Never shown in Results, independent of the user's own blocked_models. This is the
+// single source of truth for the scoring spec's Stage-1 blacklist (see lib/scoring.ts).
+// `years` (inclusive) limits the block to a model-year range; omitted = every year.
+
+export type BlacklistEntry = { make: string; model: string; years?: [number, number] };
+
+export const MODEL_BLACKLIST: BlacklistEntry[] = [
+  // Adam Rida — whole models, any year.
+  { make: "Toyota", model: "C-HR" },
+  { make: "Nissan", model: "Sentra" },
+  { make: "Honda", model: "Passport" },
+  { make: "Hyundai", model: "Sonata" },
+  { make: "Ford", model: "Focus" }, // ponytail: spec says automatic only, but transmission isn't in listing data — blocks all Focus (manuals ~nonexistent in UAE).
+  { make: "Jeep", model: "Renegade" },
+  { make: "Chevrolet", model: "Cruze" },
+  { make: "Dodge", model: "Journey" },
+  { make: "Chrysler", model: "200" },
+  { make: "BMW", model: "7 Series" },
+  { make: "Kia", model: "Optima" },
+  { make: "Mercedes-Benz", model: "GL" },
+  { make: "Mercedes-Benz", model: "ML" },
+  { make: "Audi", model: "A4" },
+  { make: "Land Rover", model: "Range Rover" },
+  { make: "Volkswagen", model: "Tiguan" },
+  { make: "Mazda", model: "CX-7" },
+  { make: "Subaru", model: "Tribeca" },
+  { make: "Mitsubishi", model: "Mirage" },
+  { make: "Infiniti", model: "QX60" },
+  { make: "Lexus", model: "HS 250h" },
+  { make: "Acura", model: "ZDX" },
+  // Omar Dahbour — model + year range.
+  { make: "Toyota", model: "Highlander", years: [2017, 2022] },
+  { make: "Toyota", model: "Sienna", years: [2017, 2020] },
+  { make: "Honda", model: "Odyssey", years: [2018, 2019] },
+  { make: "Honda", model: "Pilot", years: [2016, 2022] },
+  { make: "Honda", model: "Accord", years: [2018, 2022] },
+  { make: "Honda", model: "CR-V", years: [2017, 2022] },
+];
+
+/** Alnum tokens, single-spaced + padded: " cx 7 ". Padding makes includes() a word-boundary test, so "GL" matches "GL 500" but not "GLE". */
+function paddedTokens(s: string): string {
+  return ` ${s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()} `;
+}
+
+/** Is this car on the auto-exclude blacklist? Make matches loosely; model matches on whole tokens; years (if set) are inclusive. */
+export function isBlacklisted(l: Pick<ListingRow, "make" | "model" | "year">): boolean {
+  const mk = norm(l.make);
+  const model = paddedTokens(l.model);
+  return MODEL_BLACKLIST.some((b) => {
+    const bmk = norm(b.make);
+    if (!mk.includes(bmk) && !bmk.includes(mk)) return false;
+    if (!model.includes(paddedTokens(b.model))) return false;
+    return !b.years || (l.year != null && l.year >= b.years[0] && l.year <= b.years[1]);
+  });
+}
+
 /** Is this exact make+model (or its whole make) already on the list? */
 export function findBlock(make: string, model: string | null, blocked: BlockedModelRow[]): BlockedModelRow | undefined {
   return blocked.find(
     (b) => norm(b.make) === norm(make) && (b.model == null || (model != null && norm(b.model) === norm(model)))
   );
+}
+
+// ---- Spec region ----------------------------------------------------------------------
+// The market a car was built for (GCC / American / ...), read from the ad text since no
+// site exposes it as a field. Null when not stated. Feeds scoring criterion #1 (Spec).
+
+export function specRegion(l: Pick<ListingRow, "description">): string | null {
+  const d = (l.description ?? "").toLowerCase();
+  if (/\bgcc\b|gulf spec|khaleeji/.test(d)) return "GCC";
+  if (/\bamerican\b|\busa\b|\bus spec/.test(d)) return "American";
+  if (/\beuropean\b|euro spec|\bgerman spec/.test(d)) return "European";
+  if (/\bjapan(ese)?\b/.test(d)) return "Japanese";
+  if (/\bcanad(a|ian)\b/.test(d)) return "Canadian";
+  if (/\bkorean\b|korea spec/.test(d)) return "Korean";
+  if (/\bchin(a|ese)\b/.test(d)) return "Chinese";
+  return null;
 }
 
 /** Every copy's canonical link -> its duplicate group, for matching ranks to scraped listings. */

@@ -19,6 +19,7 @@ import {
   type ListingGroup,
 } from "../../lib/listingInsights";
 import { DealChip, SoldTag } from "./ListingCard";
+import { ScoreBadge } from "./Score";
 import { CopyIcon, ExternalIcon, HeartIcon, TrashIcon } from "./icons";
 import {
   EmptyState,
@@ -386,6 +387,12 @@ function RankRow({ r, position, isFirst, isLast, deals, scrape, onUp, onDown, on
             </div>
 
             {row.note && <p className="mt-1.5 text-sm text-neutral-600 dark:text-neutral-400">{row.note}</p>}
+
+            {shown && (
+              <div className="mt-1.5">
+                <ScoreBadge listing={shown} />
+              </div>
+            )}
 
             <p
               className={`mt-1.5 text-xs ${left <= 5 ? "font-medium text-amber-600 dark:text-amber-400" : "text-neutral-400"}`}
