@@ -16,9 +16,11 @@ export type CarScore = {
   /** Passes every Stage-1 hard exclude (applies to all lists). */
   eligible: boolean;
   excludeReasons: string[];
-  /** Fails only the age>10 / km>150k caps, so eligible for the High-Mileage/Budget list alone. */
-  budgetOnly: boolean;
-  budgetReasons: string[];
+  /** Qualifies for the High-Mileage/Budget list: under 225,000 km AND under AED 20,000. */
+  budgetEligible: boolean;
+  /** Exceeds the general-list caps (age > 10 or km > 150k), so only the Budget list can hold it. */
+  overCaps: boolean;
+  overCapReasons: string[];
   total: number; // 0-50
   criteria: CriterionScore[];
   /** For the manual accident-history penalty. */
@@ -81,9 +83,9 @@ function eligibility(
   desc: string,
   mk: string,
   model: string
-): Pick<CarScore, "eligible" | "excludeReasons" | "budgetOnly" | "budgetReasons"> {
+): Pick<CarScore, "eligible" | "excludeReasons" | "budgetEligible" | "overCaps" | "overCapReasons"> {
   const excludeReasons: string[] = [];
-  const budgetReasons: string[] = [];
+  const overCapReasons: string[] = [];
   const age = l.year == null ? null : currentYear() - l.year;
 
   if (isBlacklisted(l)) excludeReasons.push("Blacklisted model");
@@ -100,14 +102,18 @@ function eligibility(
   if (isElectric(desc) && age != null && age >= 5) excludeReasons.push(`EV ${age} years old (EV cap is 5)`);
 
   // Caps that only bar the non-budget lists.
-  if (age != null && age > 10) budgetReasons.push(`Over 10 years old (${l.year})`);
-  if (l.km != null && l.km > 150_000) budgetReasons.push("Over 150,000 km");
+  if (age != null && age > 10) overCapReasons.push(`Over 10 years old (${l.year})`);
+  if (l.km != null && l.km > 150_000) overCapReasons.push("Over 150,000 km");
+
+  // High-Mileage/Budget list: under 225,000 km AND AED 23,000 or less.
+  const budgetEligible = l.km != null && l.km < 225_000 && l.price != null && l.price <= 23_000;
 
   return {
     eligible: excludeReasons.length === 0,
     excludeReasons,
-    budgetOnly: excludeReasons.length === 0 && budgetReasons.length > 0,
-    budgetReasons,
+    budgetEligible,
+    overCaps: excludeReasons.length === 0 && overCapReasons.length > 0,
+    overCapReasons,
   };
 }
 
@@ -277,8 +283,13 @@ function selfCheck() {
   console.assert(!scoreListing({ ...base, model: "C-HR" }).eligible, "C-HR blacklisted");
   console.assert(!scoreListing({ ...base, make: "Hyundai", model: "Sonata", year: 2023 }).eligible, "2023 Sonata out");
   console.assert(!scoreListing({ ...base, km: 230_000 }).eligible, "230k km out");
-  console.assert(scoreListing({ ...base, km: 160_000 }).budgetOnly, "160k km = budget only");
-  console.assert(scoreListing({ ...base, year: 2010 }).budgetOnly, "2010 (>10yr) = budget only");
+  console.assert(scoreListing({ ...base, km: 160_000 }).overCaps, "160k km exceeds general cap");
+  console.assert(scoreListing({ ...base, year: 2010 }).overCaps, "2010 (>10yr) exceeds general cap");
+  console.assert(!rav4.budgetEligible, "RAV4 at AED 32k is not budget-eligible");
+  console.assert(scoreListing({ ...base, km: 160_000, price: 18_000 }).budgetEligible, "<225k km and <=23k AED = budget");
+  console.assert(scoreListing({ ...base, km: 160_000, price: 23_000 }).budgetEligible, "23k AED exactly = budget (inclusive)");
+  console.assert(!scoreListing({ ...base, km: 160_000, price: 25_000 }).budgetEligible, "25k AED not budget");
+  console.assert(!scoreListing({ ...base, km: 230_000, price: 15_000 }).budgetEligible, "230k km not budget");
 
   // X-Trail CVT penalty, Honda Accord year-range blacklist
   const xtrail = scoreListing({ ...base, make: "Nissan", model: "X-Trail", description: "GCC" });

@@ -42,12 +42,20 @@ export function ScoreBadge({ listing }: { listing: ListingRow }) {
             Ineligible
           </span>
         )}
-        {s.eligible && s.budgetOnly && (
+        {s.eligible && s.budgetEligible && (
           <span
-            title={s.budgetReasons.join("; ")}
+            title="Under 225,000 km and AED 23,000 or less"
             className="rounded-md bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-950 dark:text-amber-300"
           >
-            Budget list only
+            Budget list
+          </span>
+        )}
+        {s.eligible && !s.budgetEligible && s.overCaps && (
+          <span
+            title={`${s.overCapReasons.join("; ")} — and not budget-eligible (needs < 225,000 km and ≤ AED 23,000)`}
+            className="rounded-md bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700 dark:bg-red-950 dark:text-red-300"
+          >
+            No list
           </span>
         )}
       </summary>
@@ -55,9 +63,14 @@ export function ScoreBadge({ listing }: { listing: ListingRow }) {
         {!s.eligible && (
           <p className="mb-1.5 font-medium text-red-600 dark:text-red-400">Excluded: {s.excludeReasons.join("; ")}</p>
         )}
-        {s.eligible && s.budgetOnly && (
+        {s.eligible && s.overCaps && (
           <p className="mb-1.5 font-medium text-amber-600 dark:text-amber-400">
-            {s.budgetReasons.join("; ")} — High-Mileage/Budget list only
+            {s.overCapReasons.join("; ")} — barred from the general lists
+          </p>
+        )}
+        {s.eligible && s.budgetEligible && (
+          <p className="mb-1.5 font-medium text-amber-600 dark:text-amber-400">
+            High-Mileage/Budget list: under 225,000 km and AED 23,000 or less
           </p>
         )}
         <table className="w-full border-collapse">
