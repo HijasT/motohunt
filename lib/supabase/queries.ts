@@ -14,6 +14,48 @@ import type {
   SearchGroupRow,
 } from "./types";
 
+// ---- Manual overrides (Favorites → Edit) --------------------------------
+// Scraper rewrites listings.{price,km,description} every run, so hand edits live
+// in listing_overrides and are merged over the scraped row on read.
+
+export type ListingOverride = { price: number | null; km: number | null; spec: string | null };
+
+/** Overrides keyed by unique_key. Missing table (migration not applied) -> no overrides, never throws. */
+async function fetchOverrides(): Promise<Map<string, ListingOverride>> {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase.from("listing_overrides").select("unique_key, price, km, spec");
+  if (error) throw error;
+  return new Map((data ?? []).map((o) => [o.unique_key, { price: o.price, km: o.km, spec: o.spec }]));
+}
+
+function mergeOverride(l: ListingRow, ov: ListingOverride | undefined): ListingRow {
+  if (!ov) return l;
+  return {
+    ...l,
+    price: ov.price ?? l.price,
+    // A hand-set price shouldn't read as a "price drop": pin original_price to match.
+    original_price: ov.price != null ? ov.price : l.original_price,
+    km: ov.km ?? l.km,
+    spec: ov.spec ?? null,
+  };
+}
+
+/** Merges saved overrides into scraped rows. Tolerates the table not existing yet. */
+async function withOverrides(rows: ListingRow[]): Promise<ListingRow[]> {
+  if (rows.length === 0) return rows;
+  const map = await fetchOverrides().catch(() => new Map<string, ListingOverride>());
+  return map.size === 0 ? rows : rows.map((l) => mergeOverride(l, map.get(l.unique_key)));
+}
+
+/** Saves (or updates) a car's manual corrections. A null field clears that override. */
+export async function setListingOverride(uniqueKey: string, ov: ListingOverride): Promise<void> {
+  const supabase = getSupabaseClient();
+  const { error } = await supabase
+    .from("listing_overrides")
+    .upsert({ unique_key: uniqueKey, ...ov, updated_at: new Date().toISOString() }, { onConflict: "unique_key" });
+  if (error) throw error;
+}
+
 // ---- Results -----------------------------------------------------------
 
 /** Characters that would break the hand-built PostgREST filter string below. */
@@ -95,7 +137,8 @@ async function fetchListingsByStatus(status: "favorited" | "disliked"): Promise<
 
   // `.in()` doesn't preserve order; re-sort to match the status list's own order.
   const order = new Map(keys.map((k, i) => [k, i]));
-  return (data ?? []).sort((a, b) => (order.get(a.unique_key) ?? 0) - (order.get(b.unique_key) ?? 0));
+  const sorted = (data ?? []).sort((a, b) => (order.get(a.unique_key) ?? 0) - (order.get(b.unique_key) ?? 0));
+  return withOverrides(sorted);
 }
 
 export const fetchFavorites = () => fetchListingsByStatus("favorited");
@@ -128,7 +171,7 @@ export async function fetchMarketListings(): Promise<ListingRow[]> {
   const supabase = getSupabaseClient();
   const { data, error } = await supabase.from("listings").select("*").gt("expires_at", new Date().toISOString());
   if (error) throw error;
-  return data ?? [];
+  return withOverrides(data ?? []);
 }
 
 // ---- Saved searches -----------------------------------------------------

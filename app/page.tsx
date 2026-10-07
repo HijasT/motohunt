@@ -6,7 +6,7 @@ import { SavedSearchPicker } from "./components/SavedSearchPicker";
 import { ResultsTab } from "./components/ResultsTab";
 import { FavoritesTab } from "./components/FavoritesTab";
 import { SettingsTab } from "./components/SettingsTab";
-import { RankTab, listLimit } from "./components/RankTab";
+import { RankTab, listLimit, GCC_ONLY_LISTS } from "./components/RankTab";
 import { RankDialog } from "./components/RankDialog";
 import { AddCarDialog } from "./components/AddCarDialog";
 import { ScrapeStatusPill } from "./components/ScrapeHealth";
@@ -28,6 +28,7 @@ import {
   makeModelKeyOf,
   normLink,
   planRankInsert,
+  specRegion,
   type ListingGroup,
   type RankCandidate,
 } from "../lib/listingInsights";
@@ -293,6 +294,16 @@ function App() {
    * Undo puts the list back exactly as it was.
    */
   async function handleRank(car: RankCandidate, list: string, position: number) {
+    // Stage 1: General/Above-Budget are GCC-spec only. Block a car whose ad states a
+    // non-GCC spec; unconfirmed spec is allowed (the rule says verify, not auto-exclude).
+    if (GCC_ONLY_LISTS.has(list)) {
+      const g = car.link ? groupsByLink(market).get(normLink(car.link)) : undefined;
+      const region = g ? specRegion(g.primary) : null;
+      if (region && region !== "GCC") {
+        notify(`${list} is GCC-spec only — this ad is ${region} spec.`, { tone: "error" });
+        return;
+      }
+    }
     const inList = rankings.filter((r) => r.list === list); // already sorted by rank
     const limit = listLimit(list);
     // Plan first (the dialog already checked this; re-check against current data).
