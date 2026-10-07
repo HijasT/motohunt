@@ -15,6 +15,7 @@ import {
   isGroupGone,
   normLink,
   priceChange,
+  specRegion,
   type Deal,
   type ListingGroup,
 } from "../../lib/listingInsights";
@@ -37,8 +38,8 @@ import {
 /** The main list - the default choice in the rank dialog. */
 export const GENERAL_LIST = "General";
 /** Known lists render in this order; any other list name follows, alphabetically. */
-export const LIST_ORDER = [GENERAL_LIST, "Above-Budget", "High-Mileage/Budget", "Dodge"];
-/** GCC-spec only (Stage 1): a stated non-GCC car can't be ranked here. Budget/EV still accept imports. */
+export const LIST_ORDER = [GENERAL_LIST, "Above-Budget", "High-Mileage/Budget", "Chinese/EV"];
+/** GCC-spec only (Stage 1): a stated non-GCC car can't be ranked here. Budget and Chinese/EV still accept imports. */
 export const GCC_ONLY_LISTS = new Set([GENERAL_LIST, "Above-Budget"]);
 /** How many cars a list holds; ranking into a full list pushes the last one out (see page.tsx handleRank). */
 export function listLimit(list: string): number {
@@ -117,7 +118,12 @@ function resolve(row: RankingRow, groupByLink: Map<string, ListingGroup>, linkCh
 function listAsText(list: string, items: Resolved[]): string {
   const lines = [`*${list}*`];
   items.forEach((r, i) => {
-    const facts = [r.price == null ? null : `AED ${formatNumber(r.price)}`, r.km == null ? null : `${formatNumber(r.km)} km`]
+    const spec = r.shown ? specRegion(r.shown) : null;
+    const facts = [
+      r.price == null ? null : `AED ${formatNumber(r.price)}`,
+      r.km == null ? null : `${formatNumber(r.km)} km`,
+      spec ? `${spec} spec` : "spec unknown",
+    ]
       .filter(Boolean)
       .join(" · ");
     lines.push(`${i + 1}. ${r.title}${facts ? ` — ${facts}` : ""}${r.sold ? " (SOLD)" : ""}`);

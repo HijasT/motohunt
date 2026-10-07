@@ -21,6 +21,7 @@ import {
   isGroupRanked,
   normLink,
   priceChange,
+  specRegion,
   type Deal,
   type ListingGroup,
   type RankCandidate,
@@ -78,8 +79,12 @@ function hostOf(link: string): string {
 /** One drop-out, matched to the favorited listing when MotoHunt scrapes that ad. */
 type DropoutItem = { row: RankDropoutRow; group: ListingGroup | undefined };
 
-function carLine(title: string, price: number | null, km: number | null, sold: boolean): string {
-  const facts = [price == null ? null : `AED ${formatNumber(price)}`, km == null ? null : `${formatNumber(km)} km`]
+function carLine(title: string, price: number | null, km: number | null, sold: boolean, spec: string | null): string {
+  const facts = [
+    price == null ? null : `AED ${formatNumber(price)}`,
+    km == null ? null : `${formatNumber(km)} km`,
+    spec ? `${spec} spec` : "spec unknown",
+  ]
     .filter(Boolean)
     .join(" · ");
   return `${title}${facts ? ` — ${facts}` : ""}${sold ? " (SOLD)" : ""}`;
@@ -91,7 +96,7 @@ function dropoutsAsText(dropouts: DropoutItem[], linkChecks: Map<string, LinkChe
   dropouts.forEach(({ row, group }, i) => {
     const c = candidateFromDropout(row, group);
     const sold = !!(row.link && linkChecks.get(normLink(row.link))?.status === "gone");
-    lines.push(`${i + 1}. ${carLine(c.title, c.price, c.km, sold)}`);
+    lines.push(`${i + 1}. ${carLine(c.title, c.price, c.km, sold, group ? specRegion(group.primary) : null)}`);
     lines.push(row.link ?? "(no link)");
   });
   return lines.join("\n");
@@ -101,7 +106,7 @@ function favoritesAsText(groups: ListingGroup[], linkChecks: Map<string, LinkChe
   const lines = ["*Favorites*"];
   groups.forEach((g, i) => {
     const c = candidateFromGroup(g);
-    lines.push(`${i + 1}. ${carLine(c.title, c.price, c.km, !!soldCheck(g, linkChecks))}`);
+    lines.push(`${i + 1}. ${carLine(c.title, c.price, c.km, !!soldCheck(g, linkChecks), specRegion(g.primary))}`);
     lines.push(g.primary.link);
   });
   return lines.join("\n");
