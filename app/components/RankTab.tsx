@@ -15,6 +15,7 @@ import {
   isGroupGone,
   normLink,
   priceChange,
+  specRegion,
   type Deal,
   type ListingGroup,
 } from "../../lib/listingInsights";
@@ -117,7 +118,12 @@ function resolve(row: RankingRow, groupByLink: Map<string, ListingGroup>, linkCh
 function listAsText(list: string, items: Resolved[]): string {
   const lines = [`*${list}*`];
   items.forEach((r, i) => {
-    const facts = [r.price == null ? null : `AED ${formatNumber(r.price)}`, r.km == null ? null : `${formatNumber(r.km)} km`]
+    const spec = r.shown ? specRegion(r.shown) : null;
+    const facts = [
+      r.price == null ? null : `AED ${formatNumber(r.price)}`,
+      r.km == null ? null : `${formatNumber(r.km)} km`,
+      spec ? `${spec} spec` : "spec unknown",
+    ]
       .filter(Boolean)
       .join(" · ");
     lines.push(`${i + 1}. ${r.title}${facts ? ` — ${facts}` : ""}${r.sold ? " (SOLD)" : ""}`);
