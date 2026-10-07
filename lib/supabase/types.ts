@@ -16,6 +16,8 @@ export type ListingRow = {
   description: string | null;
   link: string;
   country_of_make: string | null;
+  /** Manual spec-region override (migrations/20260926_listing_overrides.sql), merged on read; wins over the spec parsed from the description. */
+  spec?: string | null;
   /** Added by migrations/20260923_price_tracking.sql - may be absent on an un-migrated database. */
   original_price?: number | null;
   previous_price?: number | null;

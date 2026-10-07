@@ -7,8 +7,10 @@ import {
   fetchFavorites,
   restoreDropouts,
   restoreStatuses,
+  setListingOverride,
   setListingStatus,
   snapshotStatuses,
+  type ListingOverride,
 } from "../../lib/supabase/queries";
 import {
   candidateFromDropout,
@@ -24,7 +26,8 @@ import {
   type RankCandidate,
 } from "../../lib/listingInsights";
 import { ListingCard, SoldTag } from "./ListingCard";
-import { CopyIcon, ExternalIcon, PlusIcon, TrashIcon, TrophyIcon } from "./icons";
+import { EditCarDialog } from "./EditCarDialog";
+import { CopyIcon, ExternalIcon, PencilIcon, PlusIcon, TrashIcon, TrophyIcon } from "./icons";
 import {
   CardGridSkeleton,
   EmptyState,
@@ -119,6 +122,8 @@ export function FavoritesTab({
   const [listings, setListings] = useState<ListingRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dropoutsOpen, setDropoutsOpen] = usePersistentState("motohunt.dropouts.open", false);
+  /** Favorite whose spec/km/price is being edited. */
+  const [editing, setEditing] = useState<ListingRow | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -129,6 +134,18 @@ export function FavoritesTab({
       cancelled = true;
     };
   }, []);
+
+  async function handleEditSave(ov: ListingOverride) {
+    if (!editing) return;
+    try {
+      await setListingOverride(editing.unique_key, ov);
+      setEditing(null);
+      setListings(await fetchFavorites()); // re-merge: card + score now reflect the edit
+      notify("Saved");
+    } catch (e) {
+      notify(`Couldn't save: ${errorMessage(e)}`, { tone: "error" });
+    }
+  }
 
   const allGroups = useMemo(
     () => groupDuplicates(listings ?? []).filter((g) => !isGroupRanked(g, rankedLinks)),
@@ -242,6 +259,13 @@ export function FavoritesTab({
           title="Remove from Favorites and hide it (undo available; restore later from Settings)"
         >
           <TrashIcon /> Remove
+        </button>
+        <button
+          className={`${ghostButtonClass} hover:!text-sky-600`}
+          onClick={() => setEditing(group.primary)}
+          title="Edit spec, mileage or price (overrides the scraped values; survives re-scrapes)"
+        >
+          <PencilIcon /> Edit
         </button>
         {!sold && (
           <button
@@ -393,6 +417,8 @@ export function FavoritesTab({
           </div>
         )}
       </section>
+
+      {editing && <EditCarDialog listing={editing} onCancel={() => setEditing(null)} onSave={handleEditSave} />}
     </div>
   );
 }

@@ -285,6 +285,12 @@ function selfCheck() {
   console.assert(xtrail.criteria[5].score === clamp5(3 - 1), "X-Trail reliability -1");
   console.assert(!scoreListing({ ...base, make: "Honda", model: "Accord", year: 2019 }).eligible, "2019 Accord blacklisted");
   console.assert(scoreListing({ ...base, make: "Honda", model: "Accord", year: 2024 }).eligible, "2024 Accord fine");
+
+  // User-call blacklist: Yaris/HR-V any year, Jetour X50 only (X70 is fine).
+  console.assert(!scoreListing({ ...base, make: "Toyota", model: "Yaris" }).eligible, "Yaris blacklisted");
+  console.assert(!scoreListing({ ...base, make: "Honda", model: "HR-V" }).eligible, "HR-V blacklisted");
+  console.assert(!scoreListing({ ...base, make: "Jetour", model: "X50 Plus" }).eligible, "Jetour X50 blacklisted");
+  console.assert(scoreListing({ ...base, make: "Jetour", model: "X70" }).eligible, "Jetour X70 fine");
   console.log("scoring self-check passed");
 }
 

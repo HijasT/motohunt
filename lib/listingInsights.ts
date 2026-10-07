@@ -265,6 +265,10 @@ export const MODEL_BLACKLIST: BlacklistEntry[] = [
   { make: "Honda", model: "Pilot", years: [2016, 2022] },
   { make: "Honda", model: "Accord", years: [2018, 2022] },
   { make: "Honda", model: "CR-V", years: [2017, 2022] },
+  // User call — whole models, any year. Jetour X50 only; X70 is explicitly fine.
+  { make: "Jetour", model: "X50" },
+  { make: "Toyota", model: "Yaris" },
+  { make: "Honda", model: "HR-V" },
 ];
 
 /** Alnum tokens, single-spaced + padded: " cx 7 ". Padding makes includes() a word-boundary test, so "GL" matches "GL 500" but not "GLE". */
@@ -295,7 +299,8 @@ export function findBlock(make: string, model: string | null, blocked: BlockedMo
 // The market a car was built for (GCC / American / ...), read from the ad text since no
 // site exposes it as a field. Null when not stated. Feeds scoring criterion #1 (Spec).
 
-export function specRegion(l: Pick<ListingRow, "description">): string | null {
+export function specRegion(l: Pick<ListingRow, "description" | "spec">): string | null {
+  if (l.spec) return l.spec; // manual override (Favorites → Edit) wins over the parsed spec
   const d = (l.description ?? "").toLowerCase();
   if (/\bgcc\b|gulf spec|khaleeji/.test(d)) return "GCC";
   if (/\bamerican\b|\busa\b|\bus spec/.test(d)) return "American";
