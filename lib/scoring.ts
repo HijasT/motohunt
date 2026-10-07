@@ -29,6 +29,14 @@ const clamp5 = (n: number) => Math.max(0, Math.min(5, n));
 const squash = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 const currentYear = () => new Date().getFullYear();
 
+/** Chinese brands (squashed make). EVs/PHEVs and these makes are held to a 3-year age cap. */
+const CHINESE_MAKES = new Set([
+  "byd", "jetour", "geely", "chery", "changan", "gwm", "greatwall", "haval", "mg", "maxus",
+  "omoda", "jaecoo", "tank", "exeed", "hongqi", "lynkco", "zeekr", "deepal", "bestune",
+  "dongfeng", "gac", "jac", "ora", "xpeng", "nio", "denza", "forthing", "foton", "baic",
+  "wuling", "seres", "voyah", "avatr",
+]);
+
 // ---- Platform-knowledge tables (keyed by squashed make) ------------------------------
 // Rough, deliberately conservative defaults; tune as real-world data comes in.
 // ponytail: per-make, not per-model/generation - a model-level table is the upgrade path if it matters.
@@ -97,7 +105,10 @@ function eligibility(
   // X-Trail 7-seat claims are listing errors, not a real trim - don't exclude on those.
   if (isSevenSeat(desc) && !(mk === "nissan" && model.includes("xtrail"))) excludeReasons.push("7-seat vehicle");
 
-  if (isElectric(desc) && age != null && age >= 5) excludeReasons.push(`EV ${age} years old (EV cap is 5)`);
+  // EVs/PHEVs and Chinese-brand cars must be <= 3 years old (older => hard exclude).
+  const youngOnly = isElectric(desc) || /phev|plug-?in/i.test(desc) || CHINESE_MAKES.has(mk);
+  if (youngOnly && age != null && age > 3)
+    excludeReasons.push(`${CHINESE_MAKES.has(mk) ? "Chinese-brand" : "EV/PHEV"} over 3 years old (${l.year})`);
 
   // Caps that only bar the non-budget lists.
   if (age != null && age > 10) budgetReasons.push(`Over 10 years old (${l.year})`);
@@ -289,8 +300,14 @@ function selfCheck() {
   // User-call blacklist: Yaris/HR-V any year, Jetour X50 only (X70 is fine).
   console.assert(!scoreListing({ ...base, make: "Toyota", model: "Yaris" }).eligible, "Yaris blacklisted");
   console.assert(!scoreListing({ ...base, make: "Honda", model: "HR-V" }).eligible, "HR-V blacklisted");
-  console.assert(!scoreListing({ ...base, make: "Jetour", model: "X50 Plus" }).eligible, "Jetour X50 blacklisted");
-  console.assert(scoreListing({ ...base, make: "Jetour", model: "X70" }).eligible, "Jetour X70 fine");
+  console.assert(!scoreListing({ ...base, make: "Jetour", model: "X50 Plus", year: 2024 }).eligible, "Jetour X50 blacklisted");
+  console.assert(scoreListing({ ...base, make: "Jetour", model: "X70", year: 2024 }).eligible, "Jetour X70 fine (<=3yr)");
+
+  // EV/PHEV/Chinese-brand 3-year age cap.
+  console.assert(!scoreListing({ ...base, make: "BYD", model: "Seal", year: 2021, description: "electric GCC" }).eligible, "BYD 2021 (>3yr) out");
+  console.assert(scoreListing({ ...base, make: "BYD", model: "Seal", year: 2024, description: "electric GCC" }).eligible, "BYD 2024 (<=3yr) ok");
+  console.assert(!scoreListing({ ...base, make: "Jetour", model: "X70", year: 2022, description: "GCC" }).eligible, "Jetour 2022 (>3yr) out");
+  console.assert(scoreListing({ ...base, make: "Toyota", model: "Camry", year: 2019, description: "GCC" }).eligible, "non-Chinese ICE 2019 fine");
   console.log("scoring self-check passed");
 }
 

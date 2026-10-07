@@ -119,6 +119,25 @@ async function fetchStatusedKeys(): Promise<string[]> {
   return (data ?? []).map((r) => r.listing_unique_key);
 }
 
+/**
+ * Fetch listings for a set of unique_keys. Chunked because a single
+ * `.in("unique_key", [...])` of hundreds of 64-char keys builds a URL past
+ * PostgREST's length limit and comes back 400 (hit on Hidden listings, which
+ * can hold many hundreds of disliked cars).
+ */
+async function fetchListingsIn(keys: string[]): Promise<ListingRow[]> {
+  if (keys.length === 0) return [];
+  const supabase = getSupabaseClient();
+  const CHUNK = 100;
+  const out: ListingRow[] = [];
+  for (let i = 0; i < keys.length; i += CHUNK) {
+    const { data, error } = await supabase.from("listings").select("*").in("unique_key", keys.slice(i, i + CHUNK));
+    if (error) throw error;
+    out.push(...(data ?? []));
+  }
+  return out;
+}
+
 async function fetchListingsByStatus(status: "favorited" | "disliked"): Promise<ListingRow[]> {
   const supabase = getSupabaseClient();
 
@@ -132,8 +151,7 @@ async function fetchListingsByStatus(status: "favorited" | "disliked"): Promise<
   const keys = (statuses ?? []).map((s) => s.listing_unique_key);
   if (keys.length === 0) return [];
 
-  const { data, error } = await supabase.from("listings").select("*").in("unique_key", keys);
-  if (error) throw error;
+  const data = await fetchListingsIn(keys);
 
   // `.in()` doesn't preserve order; re-sort to match the status list's own order.
   const order = new Map(keys.map((k, i) => [k, i]));
@@ -169,9 +187,23 @@ export async function clearListingStatus(uniqueKeys: string[]): Promise<void> {
  */
 export async function fetchMarketListings(): Promise<ListingRow[]> {
   const supabase = getSupabaseClient();
-  const { data, error } = await supabase.from("listings").select("*").gt("expires_at", new Date().toISOString());
-  if (error) throw error;
-  return withOverrides(data ?? []);
+  const now = new Date().toISOString();
+  // PostgREST caps a response at 1000 rows; the market is bigger (deal scores and
+  // rank-card matching need every live listing), so page through all of them.
+  const PAGE = 1000;
+  const all: ListingRow[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from("listings")
+      .select("*")
+      .gt("expires_at", now)
+      .order("first_seen_at", { ascending: false })
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    all.push(...(data ?? []));
+    if (!data || data.length < PAGE) break;
+  }
+  return withOverrides(all);
 }
 
 // ---- Saved searches -----------------------------------------------------
@@ -489,9 +521,5 @@ export async function addManualFavorite(car: ManualCarInput): Promise<string> {
 
 /** Specific listings by key (any status, even expired) - e.g. the "Just restored" strip. */
 export async function fetchListingsByKeys(uniqueKeys: string[]): Promise<ListingRow[]> {
-  if (uniqueKeys.length === 0) return [];
-  const supabase = getSupabaseClient();
-  const { data, error } = await supabase.from("listings").select("*").in("unique_key", uniqueKeys);
-  if (error) throw error;
-  return data ?? [];
+  return fetchListingsIn(uniqueKeys);
 }

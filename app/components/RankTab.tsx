@@ -38,8 +38,8 @@ import {
 /** The main list - the default choice in the rank dialog. */
 export const GENERAL_LIST = "General";
 /** Known lists render in this order; any other list name follows, alphabetically. */
-export const LIST_ORDER = [GENERAL_LIST, "Above-Budget", "High-Mileage/Budget", "Dodge"];
-/** GCC-spec only (Stage 1): a stated non-GCC car can't be ranked here. Budget/EV still accept imports. */
+export const LIST_ORDER = [GENERAL_LIST, "Above-Budget", "High-Mileage/Budget", "Chinese/EV"];
+/** GCC-spec only (Stage 1): a stated non-GCC car can't be ranked here. Budget and Chinese/EV still accept imports. */
 export const GCC_ONLY_LISTS = new Set([GENERAL_LIST, "Above-Budget"]);
 /** How many cars a list holds; ranking into a full list pushes the last one out (see page.tsx handleRank). */
 export function listLimit(list: string): number {
